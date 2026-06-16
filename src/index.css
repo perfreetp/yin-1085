@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
+
+:root {
+  font-family: "Noto Sans SC", "思源黑体", system-ui, sans-serif;
+  line-height: 1.8;
+  font-weight: 400;
+  font-size: 24px;
+  color: #4A3A24;
+  background-color: #FFF8F0;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+* {
+  -webkit-touch-callout: none;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.dark body,
+.dark {
+  background-color: #1A1510;
+  color: #E3EDF7;
+}
+
+input, select, textarea {
+  font-size: 24px !important;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 16px !important;
+  }
+}
+
+.print-only {
+  display: none;
+}
+
+@layer components {
+  .elder-card {
+    @apply bg-white rounded-elder shadow-elder p-6 transition-all duration-300;
+  }
+  .dark .elder-card {
+    @apply bg-warm-900 shadow-none border border-warm-800;
+  }
+  .elder-btn-primary {
+    @apply bg-warm-400 text-white text-elder-base font-bold rounded-elder px-8 py-4
+           shadow-elder-btn active:shadow-elder-btn-active active:translate-y-0.5
+           transition-all duration-150 select-none min-h-[60px];
+  }
+  .elder-btn-primary:hover {
+    @apply bg-warm-500;
+  }
+  .elder-btn-secondary {
+    @apply bg-sleep-100 text-sleep-600 text-elder-base font-bold rounded-elder px-8 py-4
+           shadow-elder active:shadow-elder-btn-active active:translate-y-0.5
+           transition-all duration-150 select-none min-h-[60px];
+  }
+  .elder-btn-ghost {
+    @apply bg-transparent text-warm-600 text-elder-base font-medium rounded-elder px-6 py-3
+           transition-all duration-150 select-none min-h-[60px];
+  }
+  .elder-btn-ghost:hover {
+    @apply bg-warm-100;
+  }
+}
+
+@keyframes waveform {
+  0% { transform: scaleY(0.2); }
+  100% { transform: scaleY(1.5); }
+}
