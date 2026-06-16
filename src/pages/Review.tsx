@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import type { SleepRecord } from '@/types';
 import { getSleepinessEmoji, getSleepinessColor } from '@/utils/time';
-import { AlertTriangle, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Printer, ChevronLeft, ChevronRight, Info, Pill } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { JargonTerm, JargonExplainer } from '@/components/JargonTerm';
 
 const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -36,19 +37,37 @@ function formatWeekRange(monday: Date): string {
 }
 
 function getTrendDisplay(trend: 'improving' | 'stable' | 'declining') {
-  if (trend === 'improving') return { icon: '📈', text: '趋势向好' };
-  if (trend === 'stable') return { icon: '➡️', text: '保持稳定' };
-  return { icon: '📉', text: '需要注意' };
+  if (trend === 'improving') return { icon: '📈', text: '趋势向好', color: 'text-green-600', bg: 'bg-green-50' };
+  if (trend === 'stable') return { icon: '➡️', text: '保持稳定', color: 'text-yellow-600', bg: 'bg-yellow-50' };
+  return { icon: '📉', text: '需要注意', color: 'text-red-600', bg: 'bg-red-50' };
+}
+
+function sleepTimeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  let min = h * 60 + m;
+  if (h < 12) min += 24 * 60;
+  return min;
+}
+
+function minutesToSleepTime(min: number): string {
+  let m = min % (24 * 60);
+  if (m < 0) m += 24 * 60;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${h}:${mm.toString().padStart(2, '0')}`;
 }
 
 export default function Review() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [expandedMedDay, setExpandedMedDay] = useState<string | null>(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chart' | 'detail'>('chart');
 
   const getWeekRecords = useStore((s) => s.getWeekRecords);
   const checkConsecutiveAbnormal = useStore((s) => s.checkConsecutiveAbnormal);
   const getWeekTrend = useStore((s) => s.getWeekTrend);
+  const getConsecutiveAbnormalDays = useStore((s) => s.getConsecutiveAbnormalDays);
+  const familyMode = useStore((s) => s.familyMode);
 
   const monday = getWeekStartDate(weekOffset);
   const weekStartISO = formatDateISO(monday);
@@ -56,225 +75,501 @@ export default function Review() {
   const records = getWeekRecords(weekStartISO);
   const hasAbnormal = checkConsecutiveAbnormal();
   const trend = getWeekTrend();
+  const abnormalDays = getConsecutiveAbnormalDays();
 
-  const recordMap = new Map<string, SleepRecord>();
-  for (const r of records) {
-    recordMap.set(r.date, r);
-  }
+  const recordMap = useMemo(() => {
+    const m = new Map<string, SleepRecord>();
+    for (const r of records) m.set(r.date, r);
+    return m;
+  }, [records]);
 
-  const weekDays: Date[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    weekDays.push(d);
-  }
+  const weekDays = useMemo(() => {
+    const arr: Date[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(d.getDate() + i);
+      arr.push(d);
+    }
+    return arr;
+  }, [monday]);
 
-  const avgSleepiness =
-    records.length > 0
-      ? records.reduce((s, r) => s + r.sleepiness, 0) / records.length
-      : 0;
-  const avgAwakenings =
-    records.length > 0
-      ? records.reduce((s, r) => s + r.awakenings, 0) / records.length
-      : 0;
+  const avgSleepiness = records.length > 0
+    ? records.reduce((s, r) => s + r.sleepiness, 0) / records.length
+    : 0;
+  const avgAwakenings = records.length > 0
+    ? records.reduce((s, r) => s + r.awakenings, 0) / records.length
+    : 0;
 
+  const avgSleepTime = useMemo(() => {
+    if (records.length === 0) return null;
+    const total = records.reduce((s, r) => s + sleepTimeToMinutes(r.sleepTime), 0);
+    return Math.round(total / records.length);
+  }, [records]);
+
+  const medChangeDays = records.filter((r) => r.medicationNote?.trim()).length;
   const trendDisplay = getTrendDisplay(trend);
 
   const handlePrint = () => window.print();
 
   return (
-    <div className="min-h-screen p-6 max-w-5xl mx-auto">
-      {hasAbnormal && !alertDismissed && (
-        <div className="no-print bg-danger-bg border-2 border-danger-border rounded-elder p-6 mb-6 animate-fade-in">
-          <div className="flex items-start gap-4">
-            <AlertTriangle className="w-10 h-10 text-danger-text flex-shrink-0 mt-1" />
-            <div className="flex-1">
-              <p className="text-elder-lg font-bold text-danger-text">
-                ⚠️ 连续多天睡眠状态不佳，建议尽快联系专业睡眠医生
-              </p>
-              <p className="text-elder-base text-danger-text/80 mt-2">
-                拨打电话建议：可拨打当地医院睡眠科电话
+    <div className="min-h-screen pb-8">
+      <div className="max-w-4xl mx-auto">
+        {hasAbnormal && !alertDismissed && (
+          <div className="no-print bg-danger-bg border-2 border-danger-border rounded-xl p-5 m-4 mb-0 animate-fade-in">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-8 h-8 text-danger-text flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <p className="text-elder-base font-bold text-danger-text">
+                  ⚠️ 连续{abnormalDays}天睡眠状态不佳
+                </p>
+                <p className="text-elder-sm text-danger-text/80 mt-1">
+                  建议尽快联系专业睡眠医生咨询
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setAlertDismissed(true)}
+              className="mt-3 w-full bg-white/60 hover:bg-white/80 text-danger-text rounded-elder py-2 text-elder-sm font-bold transition-colors"
+            >
+              我知道了
+            </button>
+          </div>
+        )}
+
+        <div className="no-print flex items-center justify-between p-4 pb-2">
+          <div>
+            <h1 className="text-elder-lg font-bold text-warm-800">📊 阶段回顾</h1>
+            <p className="text-elder-sm text-warm-500">{formatWeekRange(monday)}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <JargonExplainer />
+          </div>
+        </div>
+
+        <div className="no-print flex gap-2 px-4 mb-3">
+          <button
+            onClick={() => setActiveTab('chart')}
+            className={cn(
+              'px-4 py-2 rounded-elder text-elder-sm font-medium min-h-[44px] transition-colors',
+              activeTab === 'chart'
+                ? 'bg-warm-400 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+            )}
+          >
+            趋势图
+          </button>
+          <button
+            onClick={() => setActiveTab('detail')}
+            className={cn(
+              'px-4 py-2 rounded-elder text-elder-sm font-medium min-h-[44px] transition-colors',
+              activeTab === 'detail'
+                ? 'bg-warm-400 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+            )}
+          >
+            每日详情
+          </button>
+        </div>
+
+        <div className="no-print flex items-center gap-2 px-4 mb-4">
+          <button
+            onClick={() => setWeekOffset((o) => o - 1)}
+            className="elder-btn-ghost flex items-center gap-1 !py-2 !px-3 !text-elder-sm"
+          >
+            <ChevronLeft className="w-5 h-5" />
+            上周
+          </button>
+          <span className="flex-1 text-center text-elder-sm text-warm-600">
+            {weekOffset === 0 ? '本周' : weekOffset === -1 ? '上周' : `${Math.abs(weekOffset)}周前`}
+          </span>
+          <button
+            onClick={() => setWeekOffset((o) => Math.min(o + 1, 0))}
+            disabled={weekOffset === 0}
+            className={cn(
+              'elder-btn-ghost flex items-center gap-1 !py-2 !px-3 !text-elder-sm',
+              weekOffset === 0 && 'opacity-40 pointer-events-none'
+            )}
+          >
+            下周
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+
+        {activeTab === 'chart' && (
+          <div className="space-y-4 px-4 no-print">
+            <div className="elder-card">
+              <h3 className="text-elder-base font-bold text-warm-800 mb-3 flex items-center gap-2">
+                😊 <JargonTerm term="睡眠效率" />趋势
+              </h3>
+              <div className="grid grid-cols-7 gap-1">
+                {weekDays.map((day, i) => {
+                  const iso = formatDateISO(day);
+                  const record = recordMap.get(iso);
+                  const isToday = iso === formatDateISO(new Date());
+                  return (
+                    <div
+                      key={iso}
+                      className={cn(
+                        'flex flex-col items-center rounded-lg p-1 transition-all',
+                        isToday && 'ring-2 ring-warm-400'
+                      )}
+                    >
+                      <span className="text-elder-xs font-medium text-warm-600">
+                        {DAY_NAMES[i]}
+                      </span>
+                      <span className="text-elder-xs text-warm-400">
+                        {day.getDate()}日
+                      </span>
+                      <div className={cn(
+                        'w-full flex-1 min-h-[80px] rounded-lg mt-1 flex items-end justify-center',
+                        record ? getSleepinessColor(record.sleepiness) : 'bg-warm-100'
+                      )}>
+                        {record ? (
+                          <span className="text-2xl pb-2">{getSleepinessEmoji(record.sleepiness)}</span>
+                        ) : (
+                          <span className="text-warm-300 text-elder-xs pb-2">—</span>
+                        )}
+                      </div>
+                      {record?.medicationNote && (
+                        <Pill className="w-4 h-4 text-orange-500 mt-1" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="elder-card">
+              <h3 className="text-elder-base font-bold text-warm-800 mb-3 flex items-center gap-2">
+                🌙 醒来次数
+              </h3>
+              <div className="grid grid-cols-7 gap-1">
+                {weekDays.map((day, i) => {
+                  const iso = formatDateISO(day);
+                  const record = recordMap.get(iso);
+                  const isToday = iso === formatDateISO(new Date());
+                  const count = record?.awakenings ?? 0;
+                  const maxHeight = 80;
+                  const heightRatio = record ? Math.min(1, count / 5) : 0;
+
+                  return (
+                    <div
+                      key={iso}
+                      className={cn(
+                        'flex flex-col items-center',
+                        isToday && 'ring-2 ring-warm-400 rounded-lg p-0.5'
+                      )}
+                    >
+                      <span className="text-elder-xs font-medium text-warm-600">
+                        {DAY_NAMES[i]}
+                      </span>
+                      <div className="w-full flex-1 min-h-[80px] flex items-end justify-center pb-1">
+                        {record ? (
+                          <div
+                            className={cn(
+                              'w-6 rounded-t transition-all duration-500',
+                              count <= 1 ? 'bg-green-400' : count <= 2 ? 'bg-yellow-400' : 'bg-red-400'
+                            )}
+                            style={{ height: `${Math.max(12, maxHeight * heightRatio)}px` }}
+                          />
+                        ) : (
+                          <div className="w-6 bg-warm-100 rounded-t opacity-30" style={{ height: '12px' }} />
+                        )}
+                      </div>
+                      <span className="text-elder-xs text-warm-500 font-bold">
+                        {record ? `${count}次` : '—'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="elder-card">
+              <h3 className="text-elder-base font-bold text-warm-800 mb-3 flex items-center gap-2">
+                ⏰ 入睡时间
+              </h3>
+              <div className="grid grid-cols-7 gap-1">
+                {weekDays.map((day, i) => {
+                  const iso = formatDateISO(day);
+                  const record = recordMap.get(iso);
+                  const isToday = iso === formatDateISO(new Date());
+
+                  let position = 0;
+                  if (record) {
+                    const min = sleepTimeToMinutes(record.sleepTime);
+                    const rangeStart = 20 * 60;
+                    const rangeEnd = 27 * 60;
+                    position = (min - rangeStart) / (rangeEnd - rangeStart);
+                    position = Math.max(0, Math.min(1, position));
+                  }
+
+                  return (
+                    <div
+                      key={iso}
+                      className={cn(
+                        'flex flex-col items-center',
+                        isToday && 'ring-2 ring-warm-400 rounded-lg p-0.5'
+                      )}
+                    >
+                      <span className="text-elder-xs font-medium text-warm-600">
+                        {DAY_NAMES[i]}
+                      </span>
+                      <div className="w-full h-20 relative bg-warm-100 rounded-lg">
+                        <div className="absolute top-2 left-0 right-0 border-t border-dashed border-warm-300" />
+                        <div className="absolute bottom-2 left-0 right-0 border-t border-dashed border-warm-300" />
+                        {record && (
+                          <div
+                            className="absolute left-1/2 -translate-x-1/2 w-8 h-8 rounded-full bg-sleep-400 flex items-center justify-center text-white shadow-md"
+                            style={{ top: `${position * 60 + 4}px` }}
+                          >
+                            <span className="text-[10px] font-bold">
+                              {record.sleepTime.split(':')[0]}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-elder-xs text-warm-500">
+                        {record ? record.sleepTime : '—'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-elder-xs text-warm-400 mt-2 text-center">
+                线越靠上睡得越早，越靠下睡得越晚
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setAlertDismissed(true)}
-            className="elder-btn-secondary mt-4 w-full"
-          >
-            我知道了
-          </button>
-        </div>
-      )}
+        )}
 
-      <div className="no-print flex items-center justify-between mb-6">
-        <h1 className="text-elder-xl font-bold">📊 阶段回顾</h1>
-        <span className="text-elder-sm text-warm-600">{formatWeekRange(monday)}</span>
-      </div>
+        {activeTab === 'detail' && (
+          <div className="elder-card mx-4 no-print">
+            <h3 className="text-elder-base font-bold text-warm-800 mb-3">📋 每日详情</h3>
+            <div className="space-y-3">
+              {weekDays.map((day, i) => {
+                const iso = formatDateISO(day);
+                const record = recordMap.get(iso);
+                const isToday = iso === formatDateISO(new Date());
+                const isWeekend = i >= 5;
 
-      <div className="no-print flex items-center gap-3 mb-6">
-        <button
-          onClick={() => setWeekOffset((o) => o - 1)}
-          className="elder-btn-ghost flex items-center gap-2"
-        >
-          <ChevronLeft className="w-6 h-6" />
-          查看上周
-        </button>
-        <span className="text-elder-sm text-warm-600">
-          {weekOffset === 0 ? '本周' : weekOffset === -1 ? '上周' : `${Math.abs(weekOffset)}周前`}
-        </span>
-        <button
-          onClick={() => setWeekOffset((o) => Math.min(o + 1, 0))}
-          disabled={weekOffset === 0}
-          className={cn(
-            'elder-btn-ghost flex items-center gap-2',
-            weekOffset === 0 && 'opacity-40 pointer-events-none'
-          )}
-        >
-          查看下周
-          <ChevronRight className="w-6 h-6" />
-        </button>
-      </div>
-
-      <div className="no-print elder-card mb-6">
-        <h2 className="text-elder-lg font-bold mb-4">本周趋势</h2>
-        <div className="grid grid-cols-7 gap-2">
-          {weekDays.map((day, i) => {
-            const iso = formatDateISO(day);
-            const record = recordMap.get(iso);
-            const isToday = iso === formatDateISO(new Date());
-
-            return (
-              <div
-                key={iso}
-                className={cn(
-                  'flex flex-col items-center rounded-elder p-2 transition-all',
-                  isToday && 'ring-2 ring-warm-400'
-                )}
-              >
-                <span className="text-elder-xs font-medium text-warm-600">
-                  {DAY_NAMES[i]}
-                </span>
-                <span className="text-elder-xs text-warm-500">
-                  {formatDateCN(day)}
-                </span>
-
-                {record ? (
-                  <>
-                    <span className="text-4xl mt-1">
-                      {getSleepinessEmoji(record.sleepiness)}
-                    </span>
-                    <div
-                      className={cn(
-                        'w-full min-h-[60px] rounded-lg mt-1 flex flex-col items-center justify-center',
-                        getSleepinessColor(record.sleepiness)
+                return (
+                  <div
+                    key={iso}
+                    className={cn(
+                      'rounded-elder p-4 transition-all',
+                      isToday
+                        ? 'bg-warm-50 ring-2 ring-warm-300'
+                        : isWeekend
+                        ? 'bg-warm-50/50'
+                        : 'bg-white border border-warm-100'
+                    )}
+                  >
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-14 text-center">
+                        <div className="text-elder-sm font-bold text-warm-700">{DAY_NAMES[i]}</div>
+                        <div className="text-elder-xs text-warm-400">{day.getDate()}日</div>
+                      </div>
+                      {record ? (
+                        <>
+                          <div className="text-3xl">{getSleepinessEmoji(record.sleepiness)}</div>
+                          <div className="flex-1 space-y-0.5">
+                            <div className="text-elder-sm text-warm-700">
+                              入睡 {record.sleepTime} · 醒来 {record.awakenings} 次
+                            </div>
+                            <div className="text-elder-xs text-warm-500">
+                              {SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}
+                            </div>
+                          </div>
+                          {record.medicationNote && (
+                            <button
+                              onClick={() => setExpandedMedDay(expandedMedDay === iso ? null : iso)}
+                              className="flex-shrink-0 flex items-center gap-1 text-orange-500 text-elder-xs bg-orange-50 px-2 py-1 rounded-lg"
+                            >
+                              <Pill className="w-4 h-4" />
+                              服药
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <div className="flex-1 text-elder-sm text-warm-300 text-center">
+                          未记录
+                        </div>
                       )}
-                    >
-                      {record.medicationNote && (
-                        <span
-                          className="text-lg cursor-pointer"
-                          onClick={() =>
-                            setExpandedMedDay(expandedMedDay === iso ? null : iso)
-                          }
-                        >
-                          📋
-                        </span>
-                      )}
-                      <span className="text-elder-xs font-medium mt-0.5">
-                        醒来 {record.awakenings} 次
-                      </span>
                     </div>
-                    {expandedMedDay === iso && record.medicationNote && (
-                      <div className="mt-1 text-elder-xs text-warm-700 bg-warm-50 rounded-lg p-2 w-full text-center">
-                        {record.medicationNote}
+                    {expandedMedDay === iso && record?.medicationNote && (
+                      <div className="bg-orange-50 rounded-lg p-3 ml-14">
+                        <p className="text-elder-sm text-orange-800">
+                          💊 {record.medicationNote}
+                        </p>
                       </div>
                     )}
-                  </>
-                ) : (
-                  <>
-                    <span className="text-4xl mt-1 opacity-30">—</span>
-                    <div className="w-full min-h-[60px] rounded-lg mt-1 bg-warm-100 flex items-center justify-center">
-                      <span className="text-elder-xs text-warm-400">未记录</span>
-                    </div>
-                  </>
-                )}
+                  </div>
+                );
+              })}
+            </div>
+            {medChangeDays > 0 && (
+              <div className="mt-3 pt-3 border-t border-warm-100">
+                <p className="text-elder-xs text-warm-500 flex items-center gap-1">
+                  <Pill className="w-4 h-4 text-orange-500" />
+                  本周有 <b className="text-orange-600">{medChangeDays}</b> 天记录了服药变化
+                </p>
               </div>
-            );
-          })}
-        </div>
-        <div className="mt-3 text-elder-xs text-warm-500 flex items-center gap-2">
-          <span>📋 = 有服药变化备注</span>
-        </div>
-      </div>
+            )}
+          </div>
+        )}
 
-      <div className="no-print elder-card mb-6">
-        <h2 className="text-elder-lg font-bold mb-4">本周总结</h2>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="flex flex-col items-center bg-warm-50 rounded-elder p-4">
-            <span className="text-4xl">{getSleepinessEmoji(Math.round(avgSleepiness))}</span>
-            <span className="text-elder-sm font-medium mt-2">白天状态</span>
-            <span className="text-elder-xs text-warm-500">
-              平均 {avgSleepiness > 0 ? avgSleepiness.toFixed(1) : '—'}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mx-4 mt-4 no-print">
+          <div className={cn('elder-card flex flex-col items-center', trendDisplay.bg)}>
+            <span className="text-3xl mb-1">{trendDisplay.icon}</span>
+            <span className="text-elder-sm font-bold text-warm-700">{trendDisplay.text}</span>
+            <span className="text-elder-xs text-warm-500 mt-0.5">整体趋势</span>
+          </div>
+          <div className="elder-card flex flex-col items-center bg-sleep-50">
+            <span className="text-3xl mb-1">🌙</span>
+            <span className="text-elder-sm font-bold text-warm-700">
+              {records.length > 0 ? avgAwakenings.toFixed(1) : '—'} 次
             </span>
+            <span className="text-elder-xs text-warm-500 mt-0.5">平均醒来次数</span>
           </div>
-          <div className="flex flex-col items-center bg-sleep-100 rounded-elder p-4">
-            <span className="text-4xl">🌙</span>
-            <span className="text-elder-sm font-medium mt-2">醒来次数</span>
-            <span className="text-elder-xs text-warm-500">
-              平均 {records.length > 0 ? avgAwakenings.toFixed(1) : '—'} 次
+          <div className="elder-card flex flex-col items-center bg-warm-50">
+            <span className="text-3xl mb-1">{getSleepinessEmoji(Math.round(avgSleepiness))}</span>
+            <span className="text-elder-sm font-bold text-warm-700">
+              {avgSleepiness > 0 ? avgSleepiness.toFixed(1) : '—'} 分
             </span>
-          </div>
-          <div className="flex flex-col items-center bg-warm-50 rounded-elder p-4">
-            <span className="text-4xl">{trendDisplay.icon}</span>
-            <span className="text-elder-sm font-medium mt-2">趋势</span>
-            <span className="text-elder-xs text-warm-500">{trendDisplay.text}</span>
+            <span className="text-elder-xs text-warm-500 mt-0.5">平均白天状态</span>
           </div>
         </div>
-      </div>
 
-      <div className="no-print flex justify-center mb-6">
-        <button onClick={handlePrint} className="elder-btn-secondary flex items-center gap-3">
-          <Printer className="w-6 h-6" />
-          🖨️ 打印本周简报
-        </button>
-      </div>
+        {avgSleepTime && (
+          <div className="elder-card mx-4 mt-3 no-print">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-elder-base font-bold text-warm-800">⏰ 平均入睡时间</h3>
+                <p className="text-elder-sm text-warm-500 mt-1">
+                  本周平均 <b className="text-warm-700">{minutesToSleepTime(avgSleepTime)}</b> 上床
+                </p>
+              </div>
+              <div className="text-4xl">😴</div>
+            </div>
+          </div>
+        )}
 
-      <div className="print-only">
-        <h1 className="text-2xl font-bold text-center mb-2">好眠排程 — 周报</h1>
-        <p className="text-center text-sm mb-4">{formatWeekRange(monday)}</p>
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b-2 border-black">
-              <th className="border p-2 text-left">日期</th>
-              <th className="border p-2 text-left">睡眠时间</th>
-              <th className="border p-2 text-left">醒来次数</th>
-              <th className="border p-2 text-left">白天状态</th>
-              <th className="border p-2 text-left">服药备注</th>
-            </tr>
-          </thead>
-          <tbody>
-            {weekDays.map((day, i) => {
-              const iso = formatDateISO(day);
-              const record = recordMap.get(iso);
-              return (
-                <tr key={iso} className="border-b">
-                  <td className="border p-2">
-                    {DAY_NAMES[i]} {formatDateCN(day)}
-                  </td>
-                  <td className="border p-2">{record?.sleepTime || '—'}</td>
-                  <td className="border p-2">{record ? `${record.awakenings} 次` : '—'}</td>
-                  <td className="border p-2">
-                    {record ? getSleepinessEmoji(record.sleepiness) : '—'}
-                  </td>
-                  <td className="border p-2">{record?.medicationNote || '—'}</td>
+        <div className="flex justify-center mt-6 mb-4 no-print">
+          <button
+            onClick={handlePrint}
+            className="elder-btn-secondary flex items-center gap-2"
+          >
+            <Printer className="w-6 h-6" />
+            🖨️ 打印本周简报
+          </button>
+        </div>
+
+        {familyMode && (
+          <div className="mx-4 mb-4 p-3 bg-sleep-50 rounded-elder text-center no-print">
+            <p className="text-elder-sm text-sleep-600">
+              💡 家属提示：点击带 <Info className="w-4 h-4 inline" /> 的术语可以查看原词和解释
+            </p>
+          </div>
+        )}
+
+        <div className="print-only">
+          <div className="p-4 text-black">
+            <h1 className="text-2xl font-bold text-center mb-1">好眠排程 — 睡眠周报</h1>
+            <p className="text-center text-sm text-gray-600 mb-4">{formatWeekRange(monday)}</p>
+
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b-2 border-gray-800">
+                  <th className="border p-2 text-left">日期</th>
+                  <th className="border p-2 text-left">入睡时间</th>
+                  <th className="border p-2 text-left">醒来次数</th>
+                  <th className="border p-2 text-left">白天状态</th>
+                  <th className="border p-2 text-left">服药备注</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p className="mt-4 text-sm">
-          趋势总结：{trendDisplay.icon} {trendDisplay.text}
-        </p>
+              </thead>
+              <tbody>
+                {weekDays.map((day, i) => {
+                  const iso = formatDateISO(day);
+                  const record = recordMap.get(iso);
+                  return (
+                    <tr key={iso} className="border-b">
+                      <td className="border p-2">
+                        {DAY_NAMES[i]} {formatDateCN(day)}
+                      </td>
+                      <td className="border p-2">{record?.sleepTime || '—'}</td>
+                      <td className="border p-2">
+                        {record ? `${record.awakenings} 次` : '—'}
+                      </td>
+                      <td className="border p-2">
+                        {record ? getSleepinessEmoji(record.sleepiness) + ' ' + SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3] : '—'}
+                      </td>
+                      <td className="border p-2 text-xs">
+                        {record?.medicationNote || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+              <div className="bg-gray-100 p-3 rounded">
+                <p className="font-bold">平均醒来次数</p>
+                <p className="text-xl">{records.length > 0 ? avgAwakenings.toFixed(1) : '—'} 次</p>
+              </div>
+              <div className="bg-gray-100 p-3 rounded">
+                <p className="font-bold">平均白天状态</p>
+                <p className="text-xl">
+                  {avgSleepiness > 0 ? avgSleepiness.toFixed(1) + ' 分' : '—'}
+                  {avgSleepiness > 0 && ` (${getSleepinessEmoji(Math.round(avgSleepiness))})`}
+                </p>
+              </div>
+              <div className="bg-gray-100 p-3 rounded">
+                <p className="font-bold">平均入睡时间</p>
+                <p className="text-xl">{avgSleepTime ? minutesToSleepTime(avgSleepTime) : '—'}</p>
+              </div>
+              <div className="bg-gray-100 p-3 rounded">
+                <p className="font-bold">本周趋势</p>
+                <p className="text-xl">{trendDisplay.icon} {trendDisplay.text}</p>
+              </div>
+            </div>
+
+            {medChangeDays > 0 && (
+              <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded text-sm">
+                <p className="font-bold text-orange-800">💊 服药变化</p>
+                <p className="text-orange-700 mt-1">
+                  本周有 {medChangeDays} 天记录了服药变化，请注意区分药物效果和排程效果。
+                </p>
+                <ul className="mt-2 text-xs text-orange-600 space-y-1">
+                  {records.filter(r => r.medicationNote?.trim()).map(r => (
+                    <li key={r.id}>• {r.date}: {r.medicationNote}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {hasAbnormal && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-sm">
+                <p className="font-bold text-red-800">⚠️ 连续{abnormalDays}天状态不佳</p>
+                <p className="text-red-700 mt-1">
+                  建议联系专业睡眠医生进一步评估。
+                </p>
+              </div>
+            )}
+
+            <div className="mt-4 text-xs text-gray-500 text-center">
+              本简报由「好眠排程」生成，仅供参考，不替代专业医疗建议
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+const SLEEPINESS_LABELS = {
+  1: '精神很好',
+  2: '一般般',
+  3: '犯困没精神',
+};

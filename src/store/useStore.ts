@@ -20,6 +20,7 @@ interface AppState {
   addRelaxSession: (session: RelaxSession) => void;
   setFamilyMode: (mode: boolean) => void;
   checkConsecutiveAbnormal: () => boolean;
+  getConsecutiveAbnormalDays: () => number;
   getWeekTrend: () => 'improving' | 'stable' | 'declining';
 }
 
@@ -99,20 +100,68 @@ export const useStore = create<AppState>()(
       setFamilyMode: (mode) => set({ familyMode: mode }),
 
       checkConsecutiveAbnormal: () => {
-        const records = [...get().sleepRecords].sort(
-          (a, b) => b.date.localeCompare(a.date)
-        );
-        if (records.length < 3) return false;
-        let count = 0;
-        for (const r of records.slice(0, 7)) {
-          if (r.sleepiness >= 3 || r.awakenings >= 3) {
-            count++;
-            if (count >= 3) return true;
+        const records = get().sleepRecords;
+        const recordMap = new Map<string, SleepRecord>();
+        for (const r of records) {
+          recordMap.set(r.date, r);
+        }
+
+        const isAbnormal = (record?: SleepRecord) => {
+          if (!record) return null;
+          return record.sleepiness >= 3 || record.awakenings >= 3;
+        };
+
+        let consecutiveDays = 0;
+        const today = new Date();
+
+        for (let i = 0; i < 14; i++) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toISOString().split('T')[0];
+          const record = recordMap.get(dateStr);
+
+          if (i === 0 && !record) continue;
+
+          const abnormal = isAbnormal(record);
+          if (abnormal === true) {
+            consecutiveDays++;
+            if (consecutiveDays >= 3) return true;
+          } else if (abnormal === false) {
+            consecutiveDays = 0;
           } else {
-            count = 0;
+            consecutiveDays = 0;
           }
         }
         return false;
+      },
+
+      getConsecutiveAbnormalDays: () => {
+        const records = get().sleepRecords;
+        const recordMap = new Map<string, SleepRecord>();
+        for (const r of records) {
+          recordMap.set(r.date, r);
+        }
+
+        let maxStreak = 0;
+        let currentStreak = 0;
+        const today = new Date();
+
+        for (let i = 0; i < 14; i++) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toISOString().split('T')[0];
+          const record = recordMap.get(dateStr);
+
+          if (i === 0 && !record) continue;
+
+          if (record && (record.sleepiness >= 3 || record.awakenings >= 3)) {
+            currentStreak++;
+            maxStreak = Math.max(maxStreak, currentStreak);
+          } else {
+            currentStreak = 0;
+          }
+        }
+        return maxStreak;
       },
 
       getWeekTrend: () => {
