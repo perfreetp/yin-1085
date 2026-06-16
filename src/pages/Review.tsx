@@ -81,9 +81,9 @@ export default function Review() {
 
   const records = getWeekRecords(weekStartISO);
   const hasAbnormal = checkConsecutiveAbnormal();
-  const trend = getWeekTrend();
+  const trend = getWeekTrend(weekStartISO);
   const abnormalDays = getConsecutiveAbnormalDays();
-  const clinic = getClinicSummary();
+  const clinic = getClinicSummary(weekStartISO);
 
   const recordMap = useMemo(() => {
     const m = new Map<string, SleepRecord>();
@@ -131,7 +131,16 @@ export default function Review() {
       );
     }
 
-    const items = [
+    const items: Array<{
+      icon: string;
+      question: string;
+      data: string[] | { date: string; note: string }[];
+      good: string;
+      label: string;
+      color: string;
+      badgeColor: string;
+      isMedication?: boolean;
+    }> = [
       {
         icon: '⏰',
         question: '这周哪几天入睡比较晚（过了12点）？',
@@ -167,6 +176,7 @@ export default function Review() {
         label: '服药变化',
         color: 'bg-orange-50 text-orange-700 border-orange-200',
         badgeColor: 'bg-orange-100 text-orange-800',
+        isMedication: true,
       },
     ];
 
@@ -198,7 +208,7 @@ export default function Review() {
                       <p className="text-elder-sm font-bold mb-2">{it.question}</p>
                       {hasData ? (
                         <div className="flex flex-wrap gap-1.5">
-                          {Array.isArray(it.data[0])
+                          {it.isMedication
                             ? (it.data as { date: string; note: string }[]).map((d, idx) => (
                                 <div
                                   key={idx}

@@ -94,13 +94,22 @@ export default function Family() {
   }, [sleepRecords]);
 
   const handleSelectDate = (iso: string) => {
+    const existing = getRecordByDate(iso);
     setSelectedDate(iso);
-    setIsEditing(false);
     setSaved(false);
-    setSleepTime('');
-    setAwakenings(-1);
-    setSleepiness(0);
-    setMedicationNote('');
+    if (existing) {
+      setIsEditing(true);
+      setSleepTime(existing.sleepTime);
+      setAwakenings(existing.awakenings);
+      setSleepiness(existing.sleepiness);
+      setMedicationNote(existing.medicationNote);
+    } else {
+      setIsEditing(false);
+      setSleepTime('');
+      setAwakenings(-1);
+      setSleepiness(0);
+      setMedicationNote('');
+    }
   };
 
   function handlePinDigit(digit: number | string | null) {

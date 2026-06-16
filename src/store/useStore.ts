@@ -22,8 +22,8 @@ interface AppState {
   setFamilyMode: (mode: boolean) => void;
   checkConsecutiveAbnormal: () => boolean;
   getConsecutiveAbnormalDays: () => number;
-  getWeekTrend: () => 'improving' | 'stable' | 'declining';
-  getClinicSummary: () => {
+  getWeekTrend: (weekStart?: string) => 'improving' | 'stable' | 'declining';
+  getClinicSummary: (weekStart?: string) => {
     lateNights: string[];
     manyAwakenings: string[];
     sleepyDays: string[];
@@ -31,7 +31,7 @@ interface AppState {
     multiIssueDays: { date: string; issues: string[] }[];
     totalRecords: number;
   };
-  getCompanionAdvice: () => {
+  getCompanionAdvice: (weekStart?: string) => {
     dos: string[];
     donts: string[];
     avgSleepiness: number;
@@ -133,22 +133,12 @@ export const useStore = create<AppState>()(
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
 
-        let startOffset = 0;
         if (!recordMap.has(todayStr)) {
-          for (let i = 1; i <= 14; i++) {
-            const d = new Date(today);
-            d.setDate(d.getDate() - i);
-            const ds = d.toISOString().split('T')[0];
-            if (recordMap.has(ds)) {
-              startOffset = i;
-              break;
-            }
-            if (i === 14) return 0;
-          }
+          return 0;
         }
 
         let consecutiveDays = 0;
-        for (let i = startOffset; i < 30; i++) {
+        for (let i = 0; i < 30; i++) {
           const d = new Date(today);
           d.setDate(d.getDate() - i);
           const dateStr = d.toISOString().split('T')[0];
@@ -166,8 +156,8 @@ export const useStore = create<AppState>()(
         return consecutiveDays;
       },
 
-      getWeekTrend: () => {
-        const records = get().getWeekRecords();
+      getWeekTrend: (weekStart) => {
+        const records = get().getWeekRecords(weekStart);
         if (records.length < 3) return 'stable';
         const half = Math.floor(records.length / 2);
         const firstHalf = records.slice(0, half);
@@ -181,8 +171,8 @@ export const useStore = create<AppState>()(
         return 'stable';
       },
 
-      getClinicSummary: () => {
-        const records = get().getWeekRecords();
+      getClinicSummary: (weekStart) => {
+        const records = get().getWeekRecords(weekStart);
         const formatLabel = (dateStr: string) => {
           const d = new Date(dateStr);
           return `${d.getMonth() + 1}月${d.getDate()}日`;
@@ -233,8 +223,8 @@ export const useStore = create<AppState>()(
         };
       },
 
-      getCompanionAdvice: () => {
-        const records = get().getWeekRecords();
+      getCompanionAdvice: (weekStart) => {
+        const records = get().getWeekRecords(weekStart);
         const avgSleepiness = records.length
           ? records.reduce((s, r) => s + r.sleepiness, 0) / records.length
           : 2;
@@ -244,19 +234,21 @@ export const useStore = create<AppState>()(
         const avgBedtime = records.length
           ? records.reduce((s, r) => {
               const [h, m] = r.sleepTime.split(':').map(Number);
-              return s + h * 60 + m;
+              let mins = h * 60 + m;
+              if (h < 12) mins += 24 * 60;
+              return s + mins;
             }, 0) / records.length
           : 23 * 60;
 
         const dos: string[] = [
           '按时陪伴散步，保持傍晚的小运动习惯',
-          '提醒到点上床，不用多问“困不困”',
+          '提醒到点上床，不用多问"困不困"',
           '帮着放轻音乐或打开放松练习页面',
-          '看到“越躺越清醒”提示，帮助老人离床坐坐',
+          '看到"越躺越清醒"提示，帮助老人离床坐坐',
         ];
         const donts: string[] = [
-          '不要催着“快睡”或反复询问睡着没',
-          '不要责备“怎么又醒了”或“昨天睡得不好吧”',
+          '不要催着"快睡"或反复询问睡着没',
+          '不要责备"怎么又醒了"或"昨天睡得不好吧"',
           '不要私自调整安眠药物剂量',
           '不要在睡前聊让老人焦虑或兴奋的话题',
         ];
@@ -269,8 +261,8 @@ export const useStore = create<AppState>()(
           dos.unshift('睡前帮着检查窗帘是否遮光、室温是否舒适');
           donts.unshift('不要在夜里频繁起身查看老人睡眠');
         }
-        if (avgBedtime < 23 * 60 + 30) {
-          dos.unshift('提醒老人固定时间上床，形成节律');
+        if (avgBedtime >= 24 * 60) {
+          dos.unshift('提醒老人固定时间上床，不要熬太晚');
         }
 
         return { dos, donts, avgSleepiness, avgAwakenings, avgBedtime };
