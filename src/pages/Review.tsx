@@ -2,11 +2,17 @@ import { useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import type { SleepRecord } from '@/types';
 import { getSleepinessEmoji, getSleepinessColor } from '@/utils/time';
-import { AlertTriangle, Printer, ChevronLeft, ChevronRight, Info, Pill } from 'lucide-react';
+import { AlertTriangle, Printer, ChevronLeft, ChevronRight, Info, Pill, Stethoscope, CheckCircle2, XCircle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { JargonTerm, JargonExplainer } from '@/components/JargonTerm';
 
 const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+const SLEEPINESS_LABELS = {
+  1: '精神很好',
+  2: '一般般',
+  3: '犯困没精神',
+};
 
 function getWeekStartDate(offset: number): Date {
   const d = new Date();
@@ -61,12 +67,13 @@ export default function Review() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [expandedMedDay, setExpandedMedDay] = useState<string | null>(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chart' | 'detail'>('chart');
+  const [activeTab, setActiveTab] = useState<'chart' | 'detail' | 'clinic'>('chart');
 
   const getWeekRecords = useStore((s) => s.getWeekRecords);
   const checkConsecutiveAbnormal = useStore((s) => s.checkConsecutiveAbnormal);
   const getWeekTrend = useStore((s) => s.getWeekTrend);
   const getConsecutiveAbnormalDays = useStore((s) => s.getConsecutiveAbnormalDays);
+  const getClinicSummary = useStore((s) => s.getClinicSummary);
   const familyMode = useStore((s) => s.familyMode);
 
   const monday = getWeekStartDate(weekOffset);
@@ -76,6 +83,7 @@ export default function Review() {
   const hasAbnormal = checkConsecutiveAbnormal();
   const trend = getWeekTrend();
   const abnormalDays = getConsecutiveAbnormalDays();
+  const clinic = getClinicSummary();
 
   const recordMap = useMemo(() => {
     const m = new Map<string, SleepRecord>();
@@ -111,6 +119,182 @@ export default function Review() {
 
   const handlePrint = () => window.print();
 
+  const ClinicSummary = () => {
+    if (clinic.totalRecords === 0) {
+      return (
+        <div className="elder-card mx-4 text-center p-10">
+          <div className="text-5xl mb-3">📋</div>
+          <p className="text-elder-base text-warm-500">
+            本周还没有记录，填写后再来查看门诊小结
+          </p>
+        </div>
+      );
+    }
+
+    const items = [
+      {
+        icon: '⏰',
+        question: '这周哪几天入睡比较晚（过了12点）？',
+        data: clinic.lateNights,
+        good: '入睡时间都比较早，继续保持',
+        label: '入睡晚',
+        color: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        badgeColor: 'bg-indigo-100 text-indigo-800',
+      },
+      {
+        icon: '🌙',
+        question: '这周哪几天夜里醒得比较多（≥3次）？',
+        data: clinic.manyAwakenings,
+        good: '夜里醒来不多，睡眠连续性不错',
+        label: '醒得多',
+        color: 'bg-purple-50 text-purple-700 border-purple-200',
+        badgeColor: 'bg-purple-100 text-purple-800',
+      },
+      {
+        icon: '😪',
+        question: '这周哪几天白天犯困没精神？',
+        data: clinic.sleepyDays,
+        good: '白天精神状态都不错',
+        label: '白天困',
+        color: 'bg-amber-50 text-amber-700 border-amber-200',
+        badgeColor: 'bg-amber-100 text-amber-800',
+      },
+      {
+        icon: '💊',
+        question: '这周哪几天有服药变化或备注？',
+        data: clinic.medicationDays,
+        good: '本周没有记录服药变化',
+        label: '服药变化',
+        color: 'bg-orange-50 text-orange-700 border-orange-200',
+        badgeColor: 'bg-orange-100 text-orange-800',
+      },
+    ];
+
+    return (
+      <>
+        <div className="elder-card mx-4">
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-warm-100">
+            <Stethoscope className="w-7 h-7 text-sleep-600" />
+            <div>
+              <h3 className="text-elder-base font-bold text-warm-800">🏥 门诊沟通问答小结</h3>
+              <p className="text-elder-xs text-warm-500 mt-0.5">拿给医生看，不用自己对着图表推</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {items.map((it) => {
+              const hasData = it.data.length > 0;
+              return (
+                <div
+                  key={it.label}
+                  className={cn(
+                    'rounded-elder border-2 p-4',
+                    hasData ? it.color : 'bg-warm-50/60 text-warm-600 border-warm-200'
+                  )}
+                >
+                  <div className="flex items-start gap-2 mb-2">
+                    <span className="text-2xl">{it.icon}</span>
+                    <div className="flex-1">
+                      <p className="text-elder-sm font-bold mb-2">{it.question}</p>
+                      {hasData ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {Array.isArray(it.data[0])
+                            ? (it.data as { date: string; note: string }[]).map((d, idx) => (
+                                <div
+                                  key={idx}
+                                  className={cn(
+                                    'rounded-lg px-2.5 py-1.5 text-elder-xs font-medium',
+                                    it.badgeColor
+                                  )}
+                                >
+                                  <span className="font-bold">{d.date}</span>
+                                  {d.note && `：${d.note}`}
+                                </div>
+                              ))
+                            : (it.data as string[]).map((d, idx) => (
+                                <span
+                                  key={idx}
+                                  className={cn(
+                                    'rounded-lg px-2.5 py-1.5 text-elder-xs font-bold',
+                                    it.badgeColor
+                                  )}
+                                >
+                                  {d}
+                                </span>
+                              ))}
+                        </div>
+                      ) : (
+                        <p className="text-elder-sm flex items-center gap-1">
+                          <CheckCircle2 className="w-4 h-4 text-green-500" />
+                          {it.good}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {clinic.multiIssueDays.length > 0 && (
+          <div className="elder-card mx-4 mt-4 border-2 border-red-200 bg-red-50/50">
+            <div className="flex items-start gap-2 mb-3">
+              <XCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="text-elder-sm font-bold text-red-800">
+                  ⚠️ 同一天出现多个问题的日子
+                </h4>
+                <p className="text-elder-xs text-red-600 mt-0.5">
+                  这些日子可能值得和医生重点讨论
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {clinic.multiIssueDays.map((d, idx) => (
+                <div
+                  key={idx}
+                  className="bg-white rounded-elder p-3 flex items-center gap-3 border border-red-100"
+                >
+                  <span className="text-elder-sm font-bold text-warm-800 w-20 flex-shrink-0">
+                    {d.date}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {d.issues.map((issue) => (
+                      <span
+                        key={issue}
+                        className="bg-red-100 text-red-700 rounded-lg px-2 py-1 text-elder-xs font-medium"
+                      >
+                        {issue}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="elder-card mx-4 mt-4 bg-warm-50/60">
+          <div className="flex items-center gap-2 mb-2">
+            <ClipboardList className="w-6 h-6 text-warm-600" />
+            <h4 className="text-elder-sm font-bold text-warm-800">📝 本周记录统计</h4>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <div className="bg-white rounded-elder p-3 text-center border border-warm-100">
+              <p className="text-2xl font-bold text-warm-800">{clinic.totalRecords}</p>
+              <p className="text-elder-xs text-warm-500 mt-0.5">本周记录天数</p>
+            </div>
+            <div className="bg-white rounded-elder p-3 text-center border border-warm-100">
+              <p className="text-2xl font-bold text-warm-800">{clinic.multiIssueDays.length}</p>
+              <p className="text-elder-xs text-warm-500 mt-0.5">多问题并存天数</p>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="min-h-screen pb-8">
       <div className="max-w-4xl mx-auto">
@@ -120,7 +304,7 @@ export default function Review() {
               <AlertTriangle className="w-8 h-8 text-danger-text flex-shrink-0 mt-1" />
               <div className="flex-1">
                 <p className="text-elder-base font-bold text-danger-text">
-                  ⚠️ 连续{abnormalDays}天睡眠状态不佳
+                  ⚠️ 最近{abnormalDays}天连续睡眠状态不佳
                 </p>
                 <p className="text-elder-sm text-danger-text/80 mt-1">
                   建议尽快联系专业睡眠医生咨询
@@ -168,6 +352,18 @@ export default function Review() {
             )}
           >
             每日详情
+          </button>
+          <button
+            onClick={() => setActiveTab('clinic')}
+            className={cn(
+              'px-4 py-2 rounded-elder text-elder-sm font-medium min-h-[44px] transition-colors flex items-center gap-1.5',
+              activeTab === 'clinic'
+                ? 'bg-warm-400 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+            )}
+          >
+            <Stethoscope className="w-4 h-4" />
+            门诊小结
           </button>
         </div>
 
@@ -232,6 +428,9 @@ export default function Review() {
                       </div>
                       {record?.medicationNote && (
                         <Pill className="w-4 h-4 text-orange-500 mt-1" />
+                      )}
+                      {record?.isBackfilled && (
+                        <span className="text-[10px] text-gray-400 mt-1">补记</span>
                       )}
                     </div>
                   );
@@ -377,8 +576,18 @@ export default function Review() {
                             <div className="text-elder-sm text-warm-700">
                               入睡 {record.sleepTime} · 醒来 {record.awakenings} 次
                             </div>
-                            <div className="text-elder-xs text-warm-500">
-                              {SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}
+                            <div className="text-elder-xs text-warm-500 flex items-center gap-2">
+                              <span>{SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}</span>
+                              {record.isBackfilled && (
+                                <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[10px]">
+                                  补记
+                                </span>
+                              )}
+                              {record.filledByFamily && (
+                                <span className="bg-sleep-100 text-sleep-600 px-1.5 py-0.5 rounded text-[10px]">
+                                  家属代填
+                                </span>
+                              )}
                             </div>
                           </div>
                           {record.medicationNote && (
@@ -416,6 +625,12 @@ export default function Review() {
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'clinic' && (
+          <div className="no-print">
+            <ClinicSummary />
           </div>
         )}
 
@@ -496,6 +711,7 @@ export default function Review() {
                     <tr key={iso} className="border-b">
                       <td className="border p-2">
                         {DAY_NAMES[i]} {formatDateCN(day)}
+                        {record?.isBackfilled && <span className="text-xs text-gray-400 ml-1">（补记）</span>}
                       </td>
                       <td className="border p-2">{record?.sleepTime || '—'}</td>
                       <td className="border p-2">
@@ -535,6 +751,34 @@ export default function Review() {
               </div>
             </div>
 
+            <div className="mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded text-sm">
+              <p className="font-bold text-indigo-800 mb-2">🏥 门诊沟通小结</p>
+              <div className="space-y-1.5 text-gray-700">
+                <p>
+                  <span className="font-medium">⏰ 入睡晚的日子：</span>
+                  {clinic.lateNights.length > 0 ? clinic.lateNights.join('、') : '无'}
+                </p>
+                <p>
+                  <span className="font-medium">🌙 醒得多的日子：</span>
+                  {clinic.manyAwakenings.length > 0 ? clinic.manyAwakenings.join('、') : '无'}
+                </p>
+                <p>
+                  <span className="font-medium">😪 白天犯困的日子：</span>
+                  {clinic.sleepyDays.length > 0 ? clinic.sleepyDays.join('、') : '无'}
+                </p>
+              </div>
+              {clinic.multiIssueDays.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-indigo-200">
+                  <p className="font-medium text-gray-800">⚠️ 同日多问题（需重点讨论）：</p>
+                  <ul className="mt-1 text-xs text-gray-600">
+                    {clinic.multiIssueDays.map((d, idx) => (
+                      <li key={idx}>• {d.date}：{d.issues.join('、')}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
             {medChangeDays > 0 && (
               <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded text-sm">
                 <p className="font-bold text-orange-800">💊 服药变化</p>
@@ -551,7 +795,7 @@ export default function Review() {
 
             {hasAbnormal && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-sm">
-                <p className="font-bold text-red-800">⚠️ 连续{abnormalDays}天状态不佳</p>
+                <p className="font-bold text-red-800">⚠️ 最近{abnormalDays}天连续状态不佳</p>
                 <p className="text-red-700 mt-1">
                   建议联系专业睡眠医生进一步评估。
                 </p>
@@ -567,9 +811,3 @@ export default function Review() {
     </div>
   );
 }
-
-const SLEEPINESS_LABELS = {
-  1: '精神很好',
-  2: '一般般',
-  3: '犯困没精神',
-};

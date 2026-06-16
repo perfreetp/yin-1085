@@ -14,6 +14,7 @@ interface AppState {
   addSleepRecord: (record: SleepRecord) => void;
   updateSleepRecord: (id: string, partial: Partial<SleepRecord>) => void;
   getTodayRecord: () => SleepRecord | undefined;
+  getRecordByDate: (date: string) => SleepRecord | undefined;
   getWeekRecords: (weekStart?: string) => SleepRecord[];
   setDailySchedule: (schedule: DailySchedule) => void;
   getTodaySchedule: () => DailySchedule | undefined;
@@ -22,6 +23,21 @@ interface AppState {
   checkConsecutiveAbnormal: () => boolean;
   getConsecutiveAbnormalDays: () => number;
   getWeekTrend: () => 'improving' | 'stable' | 'declining';
+  getClinicSummary: () => {
+    lateNights: string[];
+    manyAwakenings: string[];
+    sleepyDays: string[];
+    medicationDays: { date: string; note: string }[];
+    multiIssueDays: { date: string; issues: string[] }[];
+    totalRecords: number;
+  };
+  getCompanionAdvice: () => {
+    dos: string[];
+    donts: string[];
+    avgSleepiness: number;
+    avgAwakenings: number;
+    avgBedtime: number;
+  };
 }
 
 function getTodayStr(): string {
@@ -69,6 +85,10 @@ export const useStore = create<AppState>()(
         return get().sleepRecords.find((r) => r.date === today);
       },
 
+      getRecordByDate: (date) => {
+        return get().sleepRecords.find((r) => r.date === date);
+      },
+
       getWeekRecords: (weekStart?: string) => {
         const start = weekStart || getWeekStart();
         const startDate = new Date(start);
@@ -100,39 +120,7 @@ export const useStore = create<AppState>()(
       setFamilyMode: (mode) => set({ familyMode: mode }),
 
       checkConsecutiveAbnormal: () => {
-        const records = get().sleepRecords;
-        const recordMap = new Map<string, SleepRecord>();
-        for (const r of records) {
-          recordMap.set(r.date, r);
-        }
-
-        const isAbnormal = (record?: SleepRecord) => {
-          if (!record) return null;
-          return record.sleepiness >= 3 || record.awakenings >= 3;
-        };
-
-        let consecutiveDays = 0;
-        const today = new Date();
-
-        for (let i = 0; i < 14; i++) {
-          const d = new Date(today);
-          d.setDate(d.getDate() - i);
-          const dateStr = d.toISOString().split('T')[0];
-          const record = recordMap.get(dateStr);
-
-          if (i === 0 && !record) continue;
-
-          const abnormal = isAbnormal(record);
-          if (abnormal === true) {
-            consecutiveDays++;
-            if (consecutiveDays >= 3) return true;
-          } else if (abnormal === false) {
-            consecutiveDays = 0;
-          } else {
-            consecutiveDays = 0;
-          }
-        }
-        return false;
+        return get().getConsecutiveAbnormalDays() >= 3;
       },
 
       getConsecutiveAbnormalDays: () => {
@@ -142,26 +130,40 @@ export const useStore = create<AppState>()(
           recordMap.set(r.date, r);
         }
 
-        let maxStreak = 0;
-        let currentStreak = 0;
         const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
 
-        for (let i = 0; i < 14; i++) {
+        let startOffset = 0;
+        if (!recordMap.has(todayStr)) {
+          for (let i = 1; i <= 14; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const ds = d.toISOString().split('T')[0];
+            if (recordMap.has(ds)) {
+              startOffset = i;
+              break;
+            }
+            if (i === 14) return 0;
+          }
+        }
+
+        let consecutiveDays = 0;
+        for (let i = startOffset; i < 30; i++) {
           const d = new Date(today);
           d.setDate(d.getDate() - i);
           const dateStr = d.toISOString().split('T')[0];
           const record = recordMap.get(dateStr);
 
-          if (i === 0 && !record) continue;
+          if (!record) break;
 
-          if (record && (record.sleepiness >= 3 || record.awakenings >= 3)) {
-            currentStreak++;
-            maxStreak = Math.max(maxStreak, currentStreak);
+          const isAbnormal = record.sleepiness >= 3 || record.awakenings >= 3;
+          if (isAbnormal) {
+            consecutiveDays++;
           } else {
-            currentStreak = 0;
+            break;
           }
         }
-        return maxStreak;
+        return consecutiveDays;
       },
 
       getWeekTrend: () => {
@@ -177,6 +179,101 @@ export const useStore = create<AppState>()(
         if (avgSecond < avgFirst - 0.3) return 'improving';
         if (avgSecond > avgFirst + 0.3) return 'declining';
         return 'stable';
+      },
+
+      getClinicSummary: () => {
+        const records = get().getWeekRecords();
+        const formatLabel = (dateStr: string) => {
+          const d = new Date(dateStr);
+          return `${d.getMonth() + 1}月${d.getDate()}日`;
+        };
+        const timeToMin = (t: string) => {
+          const [h, m] = t.split(':').map(Number);
+          const mins = h * 60 + m;
+          return mins < 12 * 60 ? mins + 24 * 60 : mins;
+        };
+        const lateNights = records
+          .filter(r => timeToMin(r.sleepTime) >= 24 * 60)
+          .map(r => formatLabel(r.date));
+        const manyAwakenings = records
+          .filter(r => r.awakenings >= 3)
+          .map(r => formatLabel(r.date));
+        const sleepyDays = records
+          .filter(r => r.sleepiness >= 3)
+          .map(r => formatLabel(r.date));
+        const medicationDays = records
+          .filter(r => r.medicationNote && r.medicationNote.trim())
+          .map(r => ({ date: formatLabel(r.date), note: r.medicationNote }));
+
+        const multiIssueDays = records
+          .filter(r => {
+            let count = 0;
+            if (timeToMin(r.sleepTime) >= 24 * 60) count++;
+            if (r.awakenings >= 3) count++;
+            if (r.sleepiness >= 3) count++;
+            if (r.medicationNote && r.medicationNote.trim()) count++;
+            return count >= 2;
+          })
+          .map(r => {
+            const issues: string[] = [];
+            if (timeToMin(r.sleepTime) >= 24 * 60) issues.push('入睡晚');
+            if (r.awakenings >= 3) issues.push('醒得多');
+            if (r.sleepiness >= 3) issues.push('白天困');
+            if (r.medicationNote && r.medicationNote.trim()) issues.push('服药变化');
+            return { date: formatLabel(r.date), issues };
+          });
+
+        return {
+          lateNights,
+          manyAwakenings,
+          sleepyDays,
+          medicationDays,
+          multiIssueDays,
+          totalRecords: records.length,
+        };
+      },
+
+      getCompanionAdvice: () => {
+        const records = get().getWeekRecords();
+        const avgSleepiness = records.length
+          ? records.reduce((s, r) => s + r.sleepiness, 0) / records.length
+          : 2;
+        const avgAwakenings = records.length
+          ? records.reduce((s, r) => s + r.awakenings, 0) / records.length
+          : 0;
+        const avgBedtime = records.length
+          ? records.reduce((s, r) => {
+              const [h, m] = r.sleepTime.split(':').map(Number);
+              return s + h * 60 + m;
+            }, 0) / records.length
+          : 23 * 60;
+
+        const dos: string[] = [
+          '按时陪伴散步，保持傍晚的小运动习惯',
+          '提醒到点上床，不用多问“困不困”',
+          '帮着放轻音乐或打开放松练习页面',
+          '看到“越躺越清醒”提示，帮助老人离床坐坐',
+        ];
+        const donts: string[] = [
+          '不要催着“快睡”或反复询问睡着没',
+          '不要责备“怎么又醒了”或“昨天睡得不好吧”',
+          '不要私自调整安眠药物剂量',
+          '不要在睡前聊让老人焦虑或兴奋的话题',
+        ];
+
+        if (avgSleepiness >= 2.5) {
+          dos.unshift('白天提醒老人少打盹，多晒太阳');
+          donts.unshift('不要因为白天困就让老人长时间午睡');
+        }
+        if (avgAwakenings >= 2.5) {
+          dos.unshift('睡前帮着检查窗帘是否遮光、室温是否舒适');
+          donts.unshift('不要在夜里频繁起身查看老人睡眠');
+        }
+        if (avgBedtime < 23 * 60 + 30) {
+          dos.unshift('提醒老人固定时间上床，形成节律');
+        }
+
+        return { dos, donts, avgSleepiness, avgAwakenings, avgBedtime };
       },
     }),
     {

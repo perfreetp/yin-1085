@@ -1,10 +1,21 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/store/useStore';
 import { type SleepRecord, SLEEPINESS_LABELS } from '@/types';
 import { getTimeOptions, todayStr, generateId } from '@/utils/time';
 import { cn } from '@/lib/utils';
-import { Lock, Printer, AlertTriangle, LogOut } from 'lucide-react';
+import {
+  Lock,
+  Printer,
+  AlertTriangle,
+  LogOut,
+  HeartHandshake,
+  ClipboardList,
+  Pencil,
+  CheckCircle2,
+  XCircle,
+  Sparkles,
+} from 'lucide-react';
 
 const AWAKENING_OPTIONS = [0, 1, 2, 3, 4, 5];
 
@@ -21,6 +32,25 @@ const NUMPAD = [
   [null, 0, 'del'],
 ];
 
+function getRecentDays(): { iso: string; label: string; dayLabel: string; isToday: boolean }[] {
+  const result = [];
+  const today = new Date();
+  const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const iso = d.toISOString().split('T')[0];
+    const label = `${d.getMonth() + 1}/${d.getDate()}`;
+    result.push({
+      iso,
+      label,
+      dayLabel: i === 0 ? '今天' : i === 1 ? '昨天' : dayNames[d.getDay()],
+      isToday: i === 0,
+    });
+  }
+  return result;
+}
+
 export default function Family() {
   const navigate = useNavigate();
   const profile = useStore((s) => s.profile);
@@ -29,12 +59,19 @@ export default function Family() {
   const addSleepRecord = useStore((s) => s.addSleepRecord);
   const updateSleepRecord = useStore((s) => s.updateSleepRecord);
   const getTodayRecord = useStore((s) => s.getTodayRecord);
+  const getRecordByDate = useStore((s) => s.getRecordByDate);
   const sleepRecords = useStore((s) => s.sleepRecords);
   const checkConsecutiveAbnormal = useStore((s) => s.checkConsecutiveAbnormal);
+  const getConsecutiveAbnormalDays = useStore((s) => s.getConsecutiveAbnormalDays);
+  const getCompanionAdvice = useStore((s) => s.getCompanionAdvice);
 
+  const [activeTab, setActiveTab] = useState<'fill' | 'history' | 'advice'>('fill');
   const [pinInput, setPinInput] = useState(['', '', '', '']);
   const [pinError, setPinError] = useState(false);
   const [alertDismissed, setAlertDismissed] = useState(false);
+
+  const recentDays = useMemo(() => getRecentDays(), []);
+  const [selectedDate, setSelectedDate] = useState(todayStr());
 
   const [sleepTime, setSleepTime] = useState('');
   const [awakenings, setAwakenings] = useState(-1);
@@ -43,12 +80,28 @@ export default function Family() {
   const [saved, setSaved] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  const existingRecord = getTodayRecord();
+  const dayInfo = recentDays.find((d) => d.iso === selectedDate) || recentDays[recentDays.length - 1];
+  const isBackfill = !dayInfo.isToday;
+  const existingRecord = getRecordByDate(selectedDate);
   const canSubmit = sleepTime !== '' && sleepiness !== 0;
   const hasAbnormal = checkConsecutiveAbnormal();
-  const recentRecords = [...sleepRecords]
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 7);
+  const abnormalDays = getConsecutiveAbnormalDays();
+  const companionAdvice = getCompanionAdvice();
+  const recentRecords = useMemo(() => {
+    return [...sleepRecords]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 7);
+  }, [sleepRecords]);
+
+  const handleSelectDate = (iso: string) => {
+    setSelectedDate(iso);
+    setIsEditing(false);
+    setSaved(false);
+    setSleepTime('');
+    setAwakenings(-1);
+    setSleepiness(0);
+    setMedicationNote('');
+  };
 
   function handlePinDigit(digit: number | string | null) {
     if (digit === null) return;
@@ -97,13 +150,15 @@ export default function Family() {
     } else {
       const record: SleepRecord = {
         id: generateId(),
-        date: todayStr(),
+        date: selectedDate,
         sleepTime,
         awakenings: awakenings === -1 ? 0 : awakenings,
         sleepiness,
         medicationNote,
         filledByFamily: true,
         notes: '',
+        isBackfilled: isBackfill,
+        backfilledAt: isBackfill ? new Date().toISOString() : undefined,
         createdAt: new Date().toISOString(),
       };
       addSleepRecord(record);
@@ -120,12 +175,20 @@ export default function Family() {
   }
 
   function handleEditRecord(record: SleepRecord) {
-    if (record.date !== todayStr()) return;
+    const recordDate = new Date(record.date);
+    const todayDate = new Date(todayStr());
+    const diffDays = Math.round(
+      (todayDate.getTime() - recordDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    if (diffDays > 7) return;
+
+    setSelectedDate(record.date);
     setSleepTime(record.sleepTime);
     setAwakenings(record.awakenings);
     setSleepiness(record.sleepiness);
     setMedicationNote(record.medicationNote);
     setIsEditing(true);
+    setActiveTab('fill');
   }
 
   if (!familyMode) {
@@ -204,7 +267,10 @@ export default function Family() {
               <AlertTriangle className="w-8 h-8 text-danger-text flex-shrink-0 mt-1" />
               <div className="flex-1">
                 <p className="text-elder-base font-bold text-danger-text">
-                  ⚠️ 连续多天睡眠状态不佳，建议联系专业睡眠医生
+                  ⚠️ 最近{abnormalDays}天连续睡眠状态不佳
+                </p>
+                <p className="text-elder-sm text-danger-text/80 mt-1">
+                  建议联系专业睡眠医生咨询
                 </p>
               </div>
             </div>
@@ -217,143 +283,335 @@ export default function Family() {
           </div>
         )}
 
-        <div className="elder-card space-y-5 no-print">
-          <h2 className="text-elder-lg font-bold text-warm-800">📝 帮长辈记录昨晚睡眠</h2>
-
-          <div className="space-y-3">
-            <p className="text-elder-base font-bold">昨晚几点睡的？</p>
-            <div className="grid grid-cols-4 gap-2">
-              {getTimeOptions().map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setSleepTime(opt.value)}
-                  className={cn(
-                    'bg-white rounded-elder py-2 text-elder-sm min-h-[48px] border-2 transition-all select-none',
-                    sleepTime === opt.value
-                      ? 'border-warm-400 bg-warm-100 text-warm-800'
-                      : 'border-warm-200 text-warm-700 hover:bg-warm-50'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-elder-base font-bold">昨晚醒了几次？</p>
-            <div className="flex gap-2">
-              {AWAKENING_OPTIONS.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setAwakenings(n)}
-                  className={cn(
-                    'w-14 h-14 rounded-full text-elder-base font-bold flex items-center justify-center border-2 border-warm-200 transition-all select-none',
-                    awakenings === n
-                      ? 'bg-warm-400 text-white border-warm-400'
-                      : 'bg-white text-warm-700 hover:bg-warm-50'
-                  )}
-                >
-                  {n === 5 ? '5+' : n}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-elder-base font-bold">今天感觉怎么样？</p>
-            <div className="grid grid-cols-3 gap-3">
-              {SLEEPINESS_CARDS.map((card) => (
-                <button
-                  key={card.value}
-                  onClick={() => setSleepiness(card.value)}
-                  className={cn(
-                    'elder-card flex flex-col items-center justify-center py-4 border-2 border-transparent min-h-[80px] transition-all select-none',
-                    sleepiness === card.value && card.selectedClass
-                  )}
-                >
-                  <span className="text-3xl mb-1">{card.emoji}</span>
-                  <span className="text-elder-xs">{card.text}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-elder-base font-bold mb-2">💊 服药备注（可选）</p>
-            <textarea
-              className="w-full border-2 border-warm-200 rounded-elder p-3 text-elder-sm min-h-[80px] resize-none focus:outline-none focus:border-warm-400 bg-white"
-              placeholder="记录安眠药变化..."
-              value={medicationNote}
-              onChange={(e) => setMedicationNote(e.target.value)}
-            />
-          </div>
-
+        <div className="flex gap-2 no-print">
           <button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
+            onClick={() => setActiveTab('fill')}
             className={cn(
-              'elder-btn-primary w-full',
-              !canSubmit && 'opacity-50 cursor-not-allowed'
+              'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              activeTab === 'fill'
+                ? 'bg-orange-500 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
             )}
           >
-            {saved ? '记录已保存 ✓' : isEditing ? '✅ 修改记录' : '✅ 保存记录'}
+            <Pencil className="w-5 h-5" />
+            代填记录
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              activeTab === 'history'
+                ? 'bg-orange-500 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+            )}
+          >
+            <ClipboardList className="w-5 h-5" />
+            最近记录
+          </button>
+          <button
+            onClick={() => setActiveTab('advice')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              activeTab === 'advice'
+                ? 'bg-orange-500 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+            )}
+          >
+            <HeartHandshake className="w-5 h-5" />
+            陪伴建议
           </button>
         </div>
 
-        <div className="elder-card space-y-4 no-print">
-          <h2 className="text-elder-lg font-bold text-warm-800">📊 最近7天记录</h2>
-          {recentRecords.length === 0 ? (
-            <p className="text-elder-base text-warm-500 text-center py-4">暂无记录</p>
-          ) : (
-            <div className="space-y-3">
-              {recentRecords.map((record) => {
-                const isToday = record.date === todayStr();
+        {activeTab === 'fill' && (
+          <div className="elder-card space-y-5 no-print">
+            <div className="flex items-center justify-between">
+              <h2 className="text-elder-lg font-bold text-warm-800">
+                📝 {isBackfill ? '补记睡眠记录' : '帮长辈记录昨晚睡眠'}
+              </h2>
+              {isEditing && (
+                <span className="text-elder-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-lg font-medium">
+                  修改中
+                </span>
+              )}
+            </div>
+
+            <div className="text-elder-sm text-warm-600 text-center bg-warm-50 rounded-elder p-3">
+              {dayInfo.dayLabel} {new Date(selectedDate).getMonth() + 1}月{new Date(selectedDate).getDate()}日
+              {isBackfill && <span className="ml-2 text-amber-600">（补记）</span>}
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {recentDays.map((d) => {
+                const r = getRecordByDate(d.iso);
+                const isSelected = selectedDate === d.iso;
                 return (
-                  <div
-                    key={record.id}
-                    className="flex items-center gap-3 bg-warm-50 rounded-elder p-4"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-elder-sm font-bold text-warm-800">
-                          {record.date}
-                        </span>
-                        {record.filledByFamily && (
-                          <span className="text-elder-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded">
-                            家属代填
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-elder-sm text-warm-600 mt-1">
-                        入睡 {record.sleepTime} · 醒来 {record.awakenings}次 ·{' '}
-                        {SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}
-                      </div>
-                      {record.medicationNote && (
-                        <div className="text-elder-xs text-warm-500 mt-1">
-                          💊 {record.medicationNote}
-                        </div>
-                      )}
-                    </div>
-                    {isToday ? (
-                      <button
-                        onClick={() => handleEditRecord(record)}
-                        className="text-elder-sm text-sleep-500 font-bold min-h-[44px] px-3"
-                      >
-                        🔓 修改
-                      </button>
-                    ) : (
-                      <span className="text-elder-xs text-warm-400 flex items-center gap-1">
-                        <Lock className="w-4 h-4" />
-                        不可改
-                      </span>
+                  <button
+                    key={d.iso}
+                    onClick={() => handleSelectDate(d.iso)}
+                    className={cn(
+                      'flex-shrink-0 w-16 rounded-elder p-2 flex flex-col items-center border-2 transition-all',
+                      isSelected
+                        ? 'bg-warm-400 text-white border-warm-400'
+                        : r
+                        ? 'bg-warm-50 text-warm-700 border-warm-200'
+                        : 'bg-white text-warm-400 border-warm-200 border-dashed hover:border-warm-400'
                     )}
-                  </div>
+                  >
+                    <span className="text-elder-xs font-bold">{d.dayLabel}</span>
+                    <span className="text-elder-sm font-bold mt-0.5">{d.label}</span>
+                    {r ? (
+                      <span className="text-sm mt-0.5">
+                        {isSelected ? '✓' : SNOOZE_EMOJI[r.sleepiness as 1 | 2 | 3] || '✓'}
+                      </span>
+                    ) : (
+                      <span className="text-lg mt-0.5 opacity-50">+</span>
+                    )}
+                  </button>
                 );
               })}
             </div>
-          )}
-        </div>
+
+            <div className="space-y-3">
+              <p className="text-elder-base font-bold">
+                {isBackfill ? '那天晚上几点睡的？' : '昨晚几点睡的？'}
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {getTimeOptions().map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setSleepTime(opt.value)}
+                    className={cn(
+                      'bg-white rounded-elder py-2 text-elder-sm min-h-[48px] border-2 transition-all select-none',
+                      sleepTime === opt.value
+                        ? 'border-warm-400 bg-warm-100 text-warm-800'
+                        : 'border-warm-200 text-warm-700 hover:bg-warm-50'
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-elder-base font-bold">
+                {isBackfill ? '那天夜里醒了几次？' : '昨晚醒了几次？'}
+              </p>
+              <div className="flex gap-2">
+                {AWAKENING_OPTIONS.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setAwakenings(n)}
+                    className={cn(
+                      'w-14 h-14 rounded-full text-elder-base font-bold flex items-center justify-center border-2 border-warm-200 transition-all select-none',
+                      awakenings === n
+                        ? 'bg-warm-400 text-white border-warm-400'
+                        : 'bg-white text-warm-700 hover:bg-warm-50'
+                    )}
+                  >
+                    {n === 5 ? '5+' : n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-elder-base font-bold">
+                {isBackfill ? '那天白天感觉怎么样？' : '今天感觉怎么样？'}
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                {SLEEPINESS_CARDS.map((card) => (
+                  <button
+                    key={card.value}
+                    onClick={() => setSleepiness(card.value)}
+                    className={cn(
+                      'elder-card flex flex-col items-center justify-center py-4 border-2 border-transparent min-h-[80px] transition-all select-none',
+                      sleepiness === card.value && card.selectedClass
+                    )}
+                  >
+                    <span className="text-3xl mb-1">{card.emoji}</span>
+                    <span className="text-elder-xs">{card.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-elder-base font-bold mb-2">💊 服药备注（可选）</p>
+              <textarea
+                className="w-full border-2 border-warm-200 rounded-elder p-3 text-elder-sm min-h-[80px] resize-none focus:outline-none focus:border-warm-400 bg-white"
+                placeholder="记录安眠药变化..."
+                value={medicationNote}
+                onChange={(e) => setMedicationNote(e.target.value)}
+              />
+            </div>
+
+            <button
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              className={cn(
+                'elder-btn-primary w-full',
+                !canSubmit && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              {saved ? '记录已保存 ✓' : isEditing ? '✅ 修改记录' : isBackfill ? '📝 保存补记' : '✅ 保存记录'}
+            </button>
+          </div>
+        )}
+
+        {activeTab === 'history' && (
+          <div className="elder-card space-y-4 no-print">
+            <h2 className="text-elder-lg font-bold text-warm-800">📊 最近7天记录</h2>
+            {recentRecords.length === 0 ? (
+              <p className="text-elder-base text-warm-500 text-center py-4">暂无记录</p>
+            ) : (
+              <div className="space-y-3">
+                {recentRecords.map((record) => {
+                  const recordDate = new Date(record.date);
+                  const todayDate = new Date(todayStr());
+                  const diffDays = Math.round(
+                    (todayDate.getTime() - recordDate.getTime()) / (1000 * 60 * 60 * 24)
+                  );
+                  const canEdit = diffDays <= 7;
+                  return (
+                    <div
+                      key={record.id}
+                      className="flex items-center gap-3 bg-warm-50 rounded-elder p-4"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-elder-sm font-bold text-warm-800">
+                            {record.date}
+                          </span>
+                          {record.filledByFamily && (
+                            <span className="text-elder-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded">
+                              家属代填
+                            </span>
+                          )}
+                          {record.isBackfilled && (
+                            <span className="text-elder-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                              补记
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-elder-sm text-warm-600 mt-1">
+                          入睡 {record.sleepTime} · 醒来 {record.awakenings}次 ·{' '}
+                          {SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}
+                        </div>
+                        {record.medicationNote && (
+                          <div className="text-elder-xs text-warm-500 mt-1">
+                            💊 {record.medicationNote}
+                          </div>
+                        )}
+                      </div>
+                      {canEdit ? (
+                        <button
+                          onClick={() => handleEditRecord(record)}
+                          className="text-elder-sm text-sleep-500 font-bold min-h-[44px] px-3"
+                        >
+                          🔓 修改
+                        </button>
+                      ) : (
+                        <span className="text-elder-xs text-warm-400 flex items-center gap-1">
+                          <Lock className="w-4 h-4" />
+                          不可改
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'advice' && (
+          <div className="space-y-4 no-print">
+            <div className="elder-card">
+              <div className="flex items-center gap-2 mb-3 pb-3 border-b border-warm-100">
+                <HeartHandshake className="w-7 h-7 text-pink-500" />
+                <div>
+                  <h2 className="text-elder-lg font-bold text-warm-800">💝 陪伴建议</h2>
+                  <p className="text-elder-xs text-warm-500 mt-0.5">
+                    结合最近一周情况给出的参考建议
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                <div className="bg-amber-50 rounded-elder p-3 text-center">
+                  <p className="text-2xl font-bold text-amber-700">
+                    {companionAdvice.avgSleepiness.toFixed(1)}
+                  </p>
+                  <p className="text-elder-xs text-amber-600 mt-1">平均犯困指数</p>
+                </div>
+                <div className="bg-purple-50 rounded-elder p-3 text-center">
+                  <p className="text-2xl font-bold text-purple-700">
+                    {companionAdvice.avgAwakenings.toFixed(1)}
+                  </p>
+                  <p className="text-elder-xs text-purple-600 mt-1">平均夜醒次数</p>
+                </div>
+                <div className="bg-sleep-50 rounded-elder p-3 text-center">
+                  <p className="text-2xl font-bold text-sleep-700">
+                    {formatSleepTime(companionAdvice.avgBedtime)}
+                  </p>
+                  <p className="text-elder-xs text-sleep-600 mt-1">平均入睡时间</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="elder-card bg-green-50/50 border-2 border-green-200">
+              <div className="flex items-center gap-2 mb-3">
+                <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0" />
+                <h3 className="text-elder-base font-bold text-green-800">
+                  ✅ 建议这样做
+                </h3>
+              </div>
+              <ul className="space-y-3">
+                {companionAdvice.dos.map((tip, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-green-500 text-elder-sm mt-0.5 flex-shrink-0">•</span>
+                    <span className="text-elder-sm text-green-800 leading-relaxed">{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="elder-card bg-red-50/50 border-2 border-red-200">
+              <div className="flex items-center gap-2 mb-3">
+                <XCircle className="w-6 h-6 text-red-600 flex-shrink-0" />
+                <h3 className="text-elder-base font-bold text-red-800">
+                  ❌ 建议不要做
+                </h3>
+              </div>
+              <ul className="space-y-3">
+                {companionAdvice.donts.map((tip, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-red-500 text-elder-sm mt-0.5 flex-shrink-0">•</span>
+                    <span className="text-elder-sm text-red-800 leading-relaxed">{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="elder-card bg-gradient-to-br from-pink-50 to-purple-50 border-2 border-pink-200">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-6 h-6 text-pink-500 flex-shrink-0" />
+                <h3 className="text-elder-base font-bold text-pink-800">
+                  🌟 最关键的原则
+                </h3>
+              </div>
+              <div className="bg-white/70 rounded-elder p-4">
+                <p className="text-elder-sm text-pink-900 leading-loose">
+                  睡眠是一个自然的过程，<b>越焦虑越难睡好</b>。
+                  作为家属，我们能做的最重要的事，是<b>让长辈觉得"睡得不好也没关系"</b>，
+                  而不是反复提醒他/她"要睡觉"。多陪伴，少催促，
+                  把规律的作息变成习惯，就像每天散步一样自然。
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="no-print">
           <button
@@ -361,10 +619,24 @@ export default function Family() {
             className="elder-btn-secondary w-full flex items-center justify-center gap-3"
           >
             <Printer className="w-6 h-6" />
-            🖨️ 打印本周简报
+            🖨️ 查看阶段回顾并打印简报
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+const SNOOZE_EMOJI: Record<1 | 2 | 3, string> = {
+  1: '😊',
+  2: '😐',
+  3: '😴',
+};
+
+function formatSleepTime(totalMin: number): string {
+  let m = Math.round(totalMin) % (24 * 60);
+  if (m < 0) m += 24 * 60;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${h}:${mm.toString().padStart(2, '0')}`;
 }

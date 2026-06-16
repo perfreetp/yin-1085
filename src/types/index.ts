@@ -18,6 +18,8 @@ export interface SleepRecord {
   medicationNote: string;
   filledByFamily: boolean;
   notes: string;
+  isBackfilled?: boolean;
+  backfilledAt?: string;
   createdAt: string;
 }
 

@@ -4,6 +4,16 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
 :root {
   font-family: "Noto Sans SC", "思源黑体", system-ui, sans-serif;
   line-height: 1.8;
