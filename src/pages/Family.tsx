@@ -1,7 +1,16 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/store/useStore';
-import { type SleepRecord, SLEEPINESS_LABELS } from '@/types';
+import {
+  type SleepRecord,
+  type MorningFeeling,
+  type CareNote,
+  SLEEPINESS_LABELS,
+  MORNING_FEELING_OPTIONS,
+  MORNING_FEELING_LABELS,
+  CARE_NOTE_MOOD_OPTIONS,
+  CARE_NOTE_CAFFEINE_TIME,
+} from '@/types';
 import { getTimeOptions, todayStr, generateId } from '@/utils/time';
 import { cn } from '@/lib/utils';
 import {
@@ -15,6 +24,7 @@ import {
   CheckCircle2,
   XCircle,
   Sparkles,
+  StickyNote,
 } from 'lucide-react';
 
 const AWAKENING_OPTIONS = [0, 1, 2, 3, 4, 5];
@@ -24,6 +34,8 @@ const SLEEPINESS_CARDS = [
   { value: 2, emoji: '😐', text: '一般般', selectedClass: 'border-yellow-400 bg-yellow-50' },
   { value: 3, emoji: '😴', text: '犯困没精神', selectedClass: 'border-red-400 bg-red-50' },
 ] as const;
+
+const NAP_MINUTE_OPTIONS = [0, 30, 60, 90];
 
 const NUMPAD = [
   [1, 2, 3],
@@ -56,7 +68,7 @@ export default function Family() {
   const profile = useStore((s) => s.profile);
   const familyMode = useStore((s) => s.familyMode);
   const setFamilyMode = useStore((s) => s.setFamilyMode);
-  const addSleepRecord = useStore((s) => s.addSleepRecord);
+  const upsertSleepRecord = useStore((s) => s.upsertSleepRecord);
   const updateSleepRecord = useStore((s) => s.updateSleepRecord);
   const getTodayRecord = useStore((s) => s.getTodayRecord);
   const getRecordByDate = useStore((s) => s.getRecordByDate);
@@ -64,21 +76,36 @@ export default function Family() {
   const checkConsecutiveAbnormal = useStore((s) => s.checkConsecutiveAbnormal);
   const getConsecutiveAbnormalDays = useStore((s) => s.getConsecutiveAbnormalDays);
   const getCompanionAdvice = useStore((s) => s.getCompanionAdvice);
+  const addOrUpdateCareNote = useStore((s) => s.addOrUpdateCareNote);
+  const getCareNoteByDate = useStore((s) => s.getCareNoteByDate);
 
-  const [activeTab, setActiveTab] = useState<'fill' | 'history' | 'advice'>('fill');
+  const [activeTab, setActiveTab] = useState<'fill' | 'care' | 'history' | 'advice'>('fill');
   const [pinInput, setPinInput] = useState(['', '', '', '']);
   const [pinError, setPinError] = useState(false);
   const [alertDismissed, setAlertDismissed] = useState(false);
 
   const recentDays = useMemo(() => getRecentDays(), []);
   const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [careSelectedDate, setCareSelectedDate] = useState(todayStr());
 
   const [sleepTime, setSleepTime] = useState('');
   const [awakenings, setAwakenings] = useState(-1);
   const [sleepiness, setSleepiness] = useState(0);
   const [medicationNote, setMedicationNote] = useState('');
+  const [morningFeeling, setMorningFeeling] = useState<MorningFeeling>(null);
+  const [morningNote, setMorningNote] = useState('');
   const [saved, setSaved] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+
+  const [careNap, setCareNap] = useState(false);
+  const [careNapMinutes, setCareNapMinutes] = useState<number | null>(null);
+  const [careCaffeine, setCareCaffeine] = useState(false);
+  const [careCaffeineTime, setCareCaffeineTime] = useState<CareNote['caffeineTime']>(null);
+  const [careMood, setCareMood] = useState<CareNote['mood']>(null);
+  const [careExercised, setCareExercised] = useState(false);
+  const [careExerciseType, setCareExerciseType] = useState('');
+  const [careOtherNote, setCareOtherNote] = useState('');
+  const [careSaved, setCareSaved] = useState(false);
 
   const dayInfo = recentDays.find((d) => d.iso === selectedDate) || recentDays[recentDays.length - 1];
   const isBackfill = !dayInfo.isToday;
@@ -93,6 +120,9 @@ export default function Family() {
       .slice(0, 7);
   }, [sleepRecords]);
 
+  const careDayInfo = recentDays.find((d) => d.iso === careSelectedDate) || recentDays[recentDays.length - 1];
+  const existingCareNote = getCareNoteByDate(careSelectedDate);
+
   const handleSelectDate = (iso: string) => {
     const existing = getRecordByDate(iso);
     setSelectedDate(iso);
@@ -103,12 +133,41 @@ export default function Family() {
       setAwakenings(existing.awakenings);
       setSleepiness(existing.sleepiness);
       setMedicationNote(existing.medicationNote);
+      setMorningFeeling(existing.morningFeeling ?? null);
+      setMorningNote(existing.morningNote ?? '');
     } else {
       setIsEditing(false);
       setSleepTime('');
       setAwakenings(-1);
       setSleepiness(0);
       setMedicationNote('');
+      setMorningFeeling(null);
+      setMorningNote('');
+    }
+  };
+
+  const handleCareSelectDate = (iso: string) => {
+    const existing = getCareNoteByDate(iso);
+    setCareSelectedDate(iso);
+    setCareSaved(false);
+    if (existing) {
+      setCareNap(existing.nap ?? false);
+      setCareNapMinutes(existing.napMinutes ?? null);
+      setCareCaffeine(existing.caffeine ?? false);
+      setCareCaffeineTime(existing.caffeineTime ?? null);
+      setCareMood(existing.mood ?? null);
+      setCareExercised(existing.exercised ?? false);
+      setCareExerciseType(existing.exerciseType ?? '');
+      setCareOtherNote(existing.otherNote ?? '');
+    } else {
+      setCareNap(false);
+      setCareNapMinutes(null);
+      setCareCaffeine(false);
+      setCareCaffeineTime(null);
+      setCareMood(null);
+      setCareExercised(false);
+      setCareExerciseType('');
+      setCareOtherNote('');
     }
   };
 
@@ -154,6 +213,8 @@ export default function Family() {
         awakenings: awakenings === -1 ? 0 : awakenings,
         sleepiness,
         medicationNote,
+        morningFeeling,
+        morningNote,
         filledByFamily: true,
       });
     } else {
@@ -164,13 +225,15 @@ export default function Family() {
         awakenings: awakenings === -1 ? 0 : awakenings,
         sleepiness,
         medicationNote,
+        morningFeeling,
+        morningNote,
         filledByFamily: true,
         notes: '',
         isBackfilled: isBackfill,
         backfilledAt: isBackfill ? new Date().toISOString() : undefined,
         createdAt: new Date().toISOString(),
       };
-      addSleepRecord(record);
+      upsertSleepRecord(record);
     }
     setSaved(true);
     setTimeout(() => {
@@ -180,6 +243,27 @@ export default function Family() {
       setAwakenings(-1);
       setSleepiness(0);
       setMedicationNote('');
+      setMorningFeeling(null);
+      setMorningNote('');
+    }, 2000);
+  }
+
+  function handleCareSubmit() {
+    const noteData = {
+      date: careSelectedDate,
+      nap: careNap,
+      napMinutes: careNapMinutes ?? undefined,
+      caffeine: careCaffeine,
+      caffeineTime: careCaffeineTime,
+      mood: careMood,
+      exercised: careExercised,
+      exerciseType: careExerciseType || undefined,
+      otherNote: careOtherNote || undefined,
+    };
+    addOrUpdateCareNote(noteData);
+    setCareSaved(true);
+    setTimeout(() => {
+      setCareSaved(false);
     }, 2000);
   }
 
@@ -196,6 +280,8 @@ export default function Family() {
     setAwakenings(record.awakenings);
     setSleepiness(record.sleepiness);
     setMedicationNote(record.medicationNote);
+    setMorningFeeling(record.morningFeeling ?? null);
+    setMorningNote(record.morningNote ?? '');
     setIsEditing(true);
     setActiveTab('fill');
   }
@@ -292,11 +378,11 @@ export default function Family() {
           </div>
         )}
 
-        <div className="flex gap-2 no-print">
+        <div className="flex gap-2 no-print flex-wrap">
           <button
             onClick={() => setActiveTab('fill')}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              'flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
               activeTab === 'fill'
                 ? 'bg-orange-500 text-white'
                 : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
@@ -306,9 +392,21 @@ export default function Family() {
             代填记录
           </button>
           <button
+            onClick={() => setActiveTab('care')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              activeTab === 'care'
+                ? 'bg-orange-500 text-white'
+                : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+            )}
+          >
+            <StickyNote className="w-5 h-5" />
+            照护备忘
+          </button>
+          <button
             onClick={() => setActiveTab('history')}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              'flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
               activeTab === 'history'
                 ? 'bg-orange-500 text-white'
                 : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
@@ -320,7 +418,7 @@ export default function Family() {
           <button
             onClick={() => setActiveTab('advice')}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
+              'flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-elder text-elder-sm font-bold min-h-[52px] transition-colors',
               activeTab === 'advice'
                 ? 'bg-orange-500 text-white'
                 : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
@@ -425,6 +523,34 @@ export default function Family() {
             </div>
 
             <div className="space-y-3">
+              <p className="text-elder-base font-bold">😊 早上起床感觉怎么样？</p>
+              <div className="grid grid-cols-3 gap-3">
+                {MORNING_FEELING_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value || 'empty'}
+                    onClick={() => setMorningFeeling(morningFeeling === opt.value ? null : opt.value)}
+                    className={cn(
+                      'elder-card flex flex-col items-center justify-center py-4 border-2 border-transparent min-h-[80px] transition-all select-none',
+                      morningFeeling === opt.value && 'border-blue-400 bg-blue-50'
+                    )}
+                  >
+                    <span className="text-3xl mb-1">{opt.emoji}</span>
+                    <span className="text-elder-xs">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-2">
+                <p className="text-elder-sm text-warm-600">一句话补充（可选）</p>
+                <input
+                  className="w-full border-2 border-warm-200 rounded-elder p-3 text-elder-sm min-h-[48px] focus:outline-none focus:border-warm-400 bg-white"
+                  placeholder="如：醒了头疼、做了梦..."
+                  value={morningNote}
+                  onChange={(e) => setMorningNote(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3">
               <p className="text-elder-base font-bold">
                 {isBackfill ? '那天白天感觉怎么样？' : '今天感觉怎么样？'}
               </p>
@@ -468,6 +594,211 @@ export default function Family() {
           </div>
         )}
 
+        {activeTab === 'care' && (
+          <div className="elder-card space-y-5 no-print">
+            <div className="flex items-center justify-between">
+              <h2 className="text-elder-lg font-bold text-warm-800">
+                📋 照护备忘
+              </h2>
+              {existingCareNote && (
+                <span className="text-elder-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-lg font-medium">
+                  已记录
+                </span>
+              )}
+            </div>
+
+            <div className="text-elder-sm text-warm-600 text-center bg-warm-50 rounded-elder p-3">
+              {careDayInfo.dayLabel} {new Date(careSelectedDate).getMonth() + 1}月{new Date(careSelectedDate).getDate()}日
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {recentDays.map((d) => {
+                const n = getCareNoteByDate(d.iso);
+                const isSelected = careSelectedDate === d.iso;
+                return (
+                  <button
+                    key={d.iso}
+                    onClick={() => handleCareSelectDate(d.iso)}
+                    className={cn(
+                      'flex-shrink-0 w-16 rounded-elder p-2 flex flex-col items-center border-2 transition-all',
+                      isSelected
+                        ? 'bg-warm-400 text-white border-warm-400'
+                        : n
+                        ? 'bg-warm-50 text-warm-700 border-warm-200'
+                        : 'bg-white text-warm-400 border-warm-200 border-dashed hover:border-warm-400'
+                    )}
+                  >
+                    <span className="text-elder-xs font-bold">{d.dayLabel}</span>
+                    <span className="text-elder-sm font-bold mt-0.5">{d.label}</span>
+                    {n ? (
+                      <span className="text-sm mt-0.5">✓</span>
+                    ) : (
+                      <span className="text-lg mt-0.5 opacity-50">+</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-elder-base font-bold">😴 是否午睡</p>
+                <button
+                  onClick={() => {
+                    setCareNap(!careNap);
+                    if (careNap) setCareNapMinutes(null);
+                  }}
+                  className={cn(
+                    'w-14 h-8 rounded-full transition-colors relative',
+                    careNap ? 'bg-green-500' : 'bg-gray-300'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-all',
+                      careNap ? 'left-7' : 'left-1'
+                    )}
+                  />
+                </button>
+              </div>
+              {careNap && (
+                <div className="space-y-2 pl-2">
+                  <p className="text-elder-sm text-warm-600">午睡时长（分钟）</p>
+                  <div className="flex gap-2 flex-wrap">
+                    {NAP_MINUTE_OPTIONS.map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => setCareNapMinutes(careNapMinutes === m ? null : m)}
+                        className={cn(
+                          'px-5 py-2 rounded-elder text-elder-sm min-h-[44px] border-2 transition-all select-none',
+                          careNapMinutes === m
+                            ? 'border-green-500 bg-green-50 text-green-700'
+                            : 'border-warm-200 bg-white text-warm-700 hover:bg-warm-50'
+                        )}
+                      >
+                        {m === 0 ? '没睡着' : `${m}分钟`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-elder-base font-bold">☕ 是否喝咖啡/茶</p>
+                <button
+                  onClick={() => {
+                    setCareCaffeine(!careCaffeine);
+                    if (careCaffeine) setCareCaffeineTime(null);
+                  }}
+                  className={cn(
+                    'w-14 h-8 rounded-full transition-colors relative',
+                    careCaffeine ? 'bg-green-500' : 'bg-gray-300'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-all',
+                      careCaffeine ? 'left-7' : 'left-1'
+                    )}
+                  />
+                </button>
+              </div>
+              {careCaffeine && (
+                <div className="space-y-2 pl-2">
+                  <p className="text-elder-sm text-warm-600">饮用时间</p>
+                  <div className="flex gap-2 flex-wrap">
+                    {CARE_NOTE_CAFFEINE_TIME.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setCareCaffeineTime(careCaffeineTime === opt.value ? null : opt.value)}
+                        className={cn(
+                          'px-5 py-2 rounded-elder text-elder-sm min-h-[44px] border-2 transition-all select-none',
+                          careCaffeineTime === opt.value
+                            ? 'border-amber-500 bg-amber-50 text-amber-700'
+                            : 'border-warm-200 bg-white text-warm-700 hover:bg-warm-50'
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-elder-base font-bold">😊 今天情绪</p>
+              <div className="grid grid-cols-4 gap-2">
+                {CARE_NOTE_MOOD_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setCareMood(careMood === opt.value ? null : opt.value)}
+                    className={cn(
+                      'elder-card flex flex-col items-center justify-center py-3 border-2 border-transparent min-h-[72px] transition-all select-none',
+                      careMood === opt.value && 'border-pink-400 bg-pink-50'
+                    )}
+                  >
+                    <span className="text-2xl mb-0.5">{opt.emoji}</span>
+                    <span className="text-elder-xs">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-elder-base font-bold">🏃 是否运动</p>
+                <button
+                  onClick={() => {
+                    setCareExercised(!careExercised);
+                    if (careExercised) setCareExerciseType('');
+                  }}
+                  className={cn(
+                    'w-14 h-8 rounded-full transition-colors relative',
+                    careExercised ? 'bg-green-500' : 'bg-gray-300'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-all',
+                      careExercised ? 'left-7' : 'left-1'
+                    )}
+                  />
+                </button>
+              </div>
+              {careExercised && (
+                <div className="pl-2">
+                  <input
+                    className="w-full border-2 border-warm-200 rounded-elder p-3 text-elder-sm min-h-[48px] focus:outline-none focus:border-warm-400 bg-white"
+                    placeholder="运动类型，如：散步、太极..."
+                    value={careExerciseType}
+                    onChange={(e) => setCareExerciseType(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-elder-base font-bold">📝 其他备注</p>
+              <textarea
+                className="w-full border-2 border-warm-200 rounded-elder p-3 text-elder-sm min-h-[100px] resize-none focus:outline-none focus:border-warm-400 bg-white"
+                placeholder="记录其他需要注意的事情..."
+                value={careOtherNote}
+                onChange={(e) => setCareOtherNote(e.target.value)}
+              />
+            </div>
+
+            <button
+              onClick={handleCareSubmit}
+              className="elder-btn-primary w-full"
+            >
+              {careSaved ? '已保存 ✓' : existingCareNote ? '✅ 更新备忘' : '✅ 保存备忘'}
+            </button>
+          </div>
+        )}
+
         {activeTab === 'history' && (
           <div className="elder-card space-y-4 no-print">
             <h2 className="text-elder-lg font-bold text-warm-800">📊 最近7天记录</h2>
@@ -507,6 +838,12 @@ export default function Family() {
                           入睡 {record.sleepTime} · 醒来 {record.awakenings}次 ·{' '}
                           {SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}
                         </div>
+                        {record.morningFeeling && (
+                          <div className="text-elder-xs text-blue-600 mt-1">
+                            🌅 {MORNING_FEELING_LABELS[record.morningFeeling]}
+                            {record.morningNote && ` · ${record.morningNote}`}
+                          </div>
+                        )}
                         {record.medicationNote && (
                           <div className="text-elder-xs text-warm-500 mt-1">
                             💊 {record.medicationNote}

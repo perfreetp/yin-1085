@@ -1,8 +1,30 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
-import type { SleepRecord } from '@/types';
+import type { SleepRecord, CareNote, MorningFeeling } from '@/types';
+import { MORNING_FEELING_LABELS, CARE_NOTE_MOOD_OPTIONS } from '@/types';
 import { getSleepinessEmoji, getSleepinessColor } from '@/utils/time';
-import { AlertTriangle, Printer, ChevronLeft, ChevronRight, Info, Pill, Stethoscope, CheckCircle2, XCircle, ClipboardList } from 'lucide-react';
+import {
+  AlertTriangle,
+  Printer,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Pill,
+  Stethoscope,
+  CheckCircle2,
+  XCircle,
+  ClipboardList,
+  Coffee,
+  Smile,
+  Frown,
+  Meh,
+  Sun,
+  Moon,
+  Heart,
+  Activity,
+  NotebookPen,
+  AlertCircle,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { JargonTerm, JargonExplainer } from '@/components/JargonTerm';
 
@@ -12,6 +34,21 @@ const SLEEPINESS_LABELS = {
   1: '精神很好',
   2: '一般般',
   3: '犯困没精神',
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  作息: 'bg-indigo-100 text-indigo-700',
+  夜醒: 'bg-purple-100 text-purple-700',
+  白天犯困: 'bg-amber-100 text-amber-700',
+  晨间感受: 'bg-rose-100 text-rose-700',
+  服药变化: 'bg-orange-100 text-orange-700',
+  照护备忘: 'bg-teal-100 text-teal-700',
+};
+
+const PRIORITY_STYLES: Record<string, string> = {
+  high: 'border-red-400 bg-red-50 border-2',
+  medium: 'border-orange-400 bg-orange-50 border-2',
+  low: 'border-gray-300 bg-gray-50 border-2',
 };
 
 function getWeekStartDate(offset: number): Date {
@@ -63,6 +100,26 @@ function minutesToSleepTime(min: number): string {
   return `${h}:${mm.toString().padStart(2, '0')}`;
 }
 
+function getMorningFeelingEmoji(feeling?: MorningFeeling): string {
+  if (feeling === 'good') return '😌';
+  if (feeling === 'normal') return '😐';
+  if (feeling === 'bad') return '😞';
+  return '';
+}
+
+function getCareNoteSummary(note: CareNote): string[] {
+  const parts: string[] = [];
+  if (note.nap) parts.push(`午睡${note.napMinutes ?? 0}分钟`);
+  if (note.caffeine) parts.push('喝咖啡/茶');
+  if (note.mood && note.mood !== 'normal' && note.mood !== 'happy') {
+    const moodOpt = CARE_NOTE_MOOD_OPTIONS.find((o) => o.value === note.mood);
+    if (moodOpt) parts.push(moodOpt.label);
+  }
+  if (note.exercised) parts.push(note.exerciseType || '运动');
+  if (note.otherNote) parts.push('有备注');
+  return parts;
+}
+
 export default function Review() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [expandedMedDay, setExpandedMedDay] = useState<string | null>(null);
@@ -74,6 +131,9 @@ export default function Review() {
   const getWeekTrend = useStore((s) => s.getWeekTrend);
   const getConsecutiveAbnormalDays = useStore((s) => s.getConsecutiveAbnormalDays);
   const getClinicSummary = useStore((s) => s.getClinicSummary);
+  const getDoctorConclusions = useStore((s) => s.getDoctorConclusions);
+  const getWeekCareNotes = useStore((s) => s.getWeekCareNotes);
+  const getCareNoteByDate = useStore((s) => s.getCareNoteByDate);
   const familyMode = useStore((s) => s.familyMode);
 
   const monday = getWeekStartDate(weekOffset);
@@ -84,12 +144,20 @@ export default function Review() {
   const trend = getWeekTrend(weekStartISO);
   const abnormalDays = getConsecutiveAbnormalDays();
   const clinic = getClinicSummary(weekStartISO);
+  const doctorConclusions = getDoctorConclusions(weekStartISO);
+  const weekCareNotes = getWeekCareNotes(weekStartISO);
 
   const recordMap = useMemo(() => {
     const m = new Map<string, SleepRecord>();
     for (const r of records) m.set(r.date, r);
     return m;
   }, [records]);
+
+  const careNoteMap = useMemo(() => {
+    const m = new Map<string, CareNote>();
+    for (const n of weekCareNotes) m.set(n.date, n);
+    return m;
+  }, [weekCareNotes]);
 
   const weekDays = useMemo(() => {
     const arr: Date[] = [];
@@ -115,9 +183,119 @@ export default function Review() {
   }, [records]);
 
   const medChangeDays = records.filter((r) => r.medicationNote?.trim()).length;
+  const careNoteDays = weekCareNotes.length;
   const trendDisplay = getTrendDisplay(trend);
 
   const handlePrint = () => window.print();
+
+  const DoctorConclusions = () => {
+    if (doctorConclusions.length === 0) return null;
+
+    return (
+      <div className="elder-card mx-4 mt-4 no-print">
+        <div className="flex items-center gap-2 mb-3 pb-3 border-b border-warm-100">
+          <Stethoscope className="w-6 h-6 text-sleep-600" />
+          <div>
+            <h3 className="text-elder-base font-bold text-warm-800">🎯 医生自动结论</h3>
+            <p className="text-elder-xs text-warm-500 mt-0.5">基于本周数据自动分析生成</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {doctorConclusions.slice(0, 3).map((c, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                'rounded-elder p-3 transition-all',
+                PRIORITY_STYLES[c.priority]
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <span
+                  className={cn(
+                    'rounded-lg px-2 py-0.5 text-elder-xs font-bold flex-shrink-0 mt-0.5',
+                    CATEGORY_COLORS[c.category] || 'bg-gray-100 text-gray-700'
+                  )}
+                >
+                  {c.category}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-elder-sm font-bold text-warm-800">{c.title}</p>
+                  <p className="text-elder-xs text-warm-600 mt-0.5">{c.detail}</p>
+                </div>
+                {c.priority === 'high' && (
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const CareNoteBadges = ({ note }: { note: CareNote }) => {
+    const items: Array<{ icon: JSX.Element; text: string; color: string }> = [];
+    if (note.nap) {
+      items.push({
+        icon: <Moon className="w-3.5 h-3.5" />,
+        text: `午睡${note.napMinutes ?? 0}分`,
+        color: 'bg-indigo-50 text-indigo-600 border-indigo-200',
+      });
+    }
+    if (note.caffeine) {
+      items.push({
+        icon: <Coffee className="w-3.5 h-3.5" />,
+        text: '咖啡/茶',
+        color: 'bg-amber-50 text-amber-700 border-amber-200',
+      });
+    }
+    if (note.mood && note.mood !== 'normal' && note.mood !== 'happy') {
+      const isSad = note.mood === 'sad';
+      items.push({
+        icon: isSad ? <Frown className="w-3.5 h-3.5" /> : <Meh className="w-3.5 h-3.5" />,
+        text: isSad ? '情绪低落' : '焦虑',
+        color: 'bg-rose-50 text-rose-600 border-rose-200',
+      });
+    }
+    if (note.exercised) {
+      items.push({
+        icon: <Activity className="w-3.5 h-3.5" />,
+        text: note.exerciseType || '运动',
+        color: 'bg-green-50 text-green-600 border-green-200',
+      });
+    }
+    if (note.otherNote) {
+      items.push({
+        icon: <NotebookPen className="w-3.5 h-3.5" />,
+        text: '备注',
+        color: 'bg-slate-50 text-slate-600 border-slate-200',
+      });
+    }
+
+    if (items.length === 0) return null;
+
+    return (
+      <div className="flex flex-wrap gap-1.5 mt-2 ml-14">
+        {items.map((it, i) => (
+          <span
+            key={i}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium border',
+              it.color
+            )}
+          >
+            {it.icon}
+            {it.text}
+          </span>
+        ))}
+        {note.otherNote && (
+          <p className="w-full text-elder-xs text-warm-500 mt-1 pl-1">
+            📝 {note.otherNote}
+          </p>
+        )}
+      </div>
+    );
+  };
 
   const ClinicSummary = () => {
     if (clinic.totalRecords === 0) {
@@ -169,6 +347,15 @@ export default function Review() {
         badgeColor: 'bg-amber-100 text-amber-800',
       },
       {
+        icon: '😞',
+        question: '这周哪几天起床后感觉睡得不太好？',
+        data: clinic.badMorningDays,
+        good: '晨起感觉都还不错',
+        label: '晨起差',
+        color: 'bg-rose-50 text-rose-700 border-rose-200',
+        badgeColor: 'bg-rose-100 text-rose-800',
+      },
+      {
         icon: '💊',
         question: '这周哪几天有服药变化或备注？',
         data: clinic.medicationDays,
@@ -179,6 +366,22 @@ export default function Review() {
         isMedication: true,
       },
     ];
+
+    const multiIssueDaysWithCare = useMemo(() => {
+      return clinic.multiIssueDays.map((d) => {
+        const issues = [...d.issues];
+        const isoDate = weekDays.find(
+          (wd) => formatDateCN(wd) === d.date
+        );
+        if (isoDate) {
+          const careNote = careNoteMap.get(formatDateISO(isoDate));
+          if (careNote && getCareNoteSummary(careNote).length > 0) {
+            issues.push('照护备忘');
+          }
+        }
+        return { ...d, issues };
+      });
+    }, [clinic.multiIssueDays, weekDays, careNoteMap]);
 
     return (
       <>
@@ -247,7 +450,7 @@ export default function Review() {
           </div>
         </div>
 
-        {clinic.multiIssueDays.length > 0 && (
+        {multiIssueDaysWithCare.length > 0 && (
           <div className="elder-card mx-4 mt-4 border-2 border-red-200 bg-red-50/50">
             <div className="flex items-start gap-2 mb-3">
               <XCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
@@ -261,7 +464,7 @@ export default function Review() {
               </div>
             </div>
             <div className="space-y-2">
-              {clinic.multiIssueDays.map((d, idx) => (
+              {multiIssueDaysWithCare.map((d, idx) => (
                 <div
                   key={idx}
                   className="bg-white rounded-elder p-3 flex items-center gap-3 border border-red-100"
@@ -273,7 +476,12 @@ export default function Review() {
                     {d.issues.map((issue) => (
                       <span
                         key={issue}
-                        className="bg-red-100 text-red-700 rounded-lg px-2 py-1 text-elder-xs font-medium"
+                        className={cn(
+                          'rounded-lg px-2 py-1 text-elder-xs font-medium',
+                          issue === '照护备忘'
+                            ? 'bg-teal-100 text-teal-700'
+                            : 'bg-red-100 text-red-700'
+                        )}
                       >
                         {issue}
                       </span>
@@ -296,8 +504,16 @@ export default function Review() {
               <p className="text-elder-xs text-warm-500 mt-0.5">本周记录天数</p>
             </div>
             <div className="bg-white rounded-elder p-3 text-center border border-warm-100">
-              <p className="text-2xl font-bold text-warm-800">{clinic.multiIssueDays.length}</p>
+              <p className="text-2xl font-bold text-warm-800">{multiIssueDaysWithCare.length}</p>
               <p className="text-elder-xs text-warm-500 mt-0.5">多问题并存天数</p>
+            </div>
+            <div className="bg-white rounded-elder p-3 text-center border border-warm-100">
+              <p className="text-2xl font-bold text-warm-800">{medChangeDays}</p>
+              <p className="text-elder-xs text-warm-500 mt-0.5">服药变化天数</p>
+            </div>
+            <div className="bg-white rounded-elder p-3 text-center border border-warm-100">
+              <p className="text-2xl font-bold text-teal-700">{careNoteDays}</p>
+              <p className="text-elder-xs text-warm-500 mt-0.5">照护备忘天数</p>
             </div>
           </div>
         </div>
@@ -329,6 +545,8 @@ export default function Review() {
             </button>
           </div>
         )}
+
+        <DoctorConclusions />
 
         <div className="no-print flex items-center justify-between p-4 pb-2">
           <div>
@@ -412,6 +630,7 @@ export default function Review() {
                   const iso = formatDateISO(day);
                   const record = recordMap.get(iso);
                   const isToday = iso === formatDateISO(new Date());
+                  const hasBadMorning = record?.morningFeeling === 'bad';
                   return (
                     <div
                       key={iso}
@@ -427,11 +646,20 @@ export default function Review() {
                         {day.getDate()}日
                       </span>
                       <div className={cn(
-                        'w-full flex-1 min-h-[80px] rounded-lg mt-1 flex items-end justify-center',
+                        'w-full flex-1 min-h-[80px] rounded-lg mt-1 flex items-end justify-center relative',
                         record ? getSleepinessColor(record.sleepiness) : 'bg-warm-100'
                       )}>
                         {record ? (
-                          <span className="text-2xl pb-2">{getSleepinessEmoji(record.sleepiness)}</span>
+                          <>
+                            <span className="text-2xl pb-2">
+                              {getSleepinessEmoji(record.sleepiness)}
+                            </span>
+                            {hasBadMorning && (
+                              <span className="absolute top-1 right-1 text-base leading-none">
+                                ⚠️
+                              </span>
+                            )}
+                          </>
                         ) : (
                           <span className="text-warm-300 text-elder-xs pb-2">—</span>
                         )}
@@ -446,6 +674,9 @@ export default function Review() {
                   );
                 })}
               </div>
+              <p className="text-elder-xs text-warm-400 mt-2 text-center">
+                ⚠️ 表示起床后感觉睡得不太好
+              </p>
             </div>
 
             <div className="elder-card">
@@ -559,6 +790,7 @@ export default function Review() {
               {weekDays.map((day, i) => {
                 const iso = formatDateISO(day);
                 const record = recordMap.get(iso);
+                const careNote = careNoteMap.get(iso);
                 const isToday = iso === formatDateISO(new Date());
                 const isWeekend = i >= 5;
 
@@ -582,11 +814,11 @@ export default function Review() {
                       {record ? (
                         <>
                           <div className="text-3xl">{getSleepinessEmoji(record.sleepiness)}</div>
-                          <div className="flex-1 space-y-0.5">
+                          <div className="flex-1 space-y-1">
                             <div className="text-elder-sm text-warm-700">
                               入睡 {record.sleepTime} · 醒来 {record.awakenings} 次
                             </div>
-                            <div className="text-elder-xs text-warm-500 flex items-center gap-2">
+                            <div className="text-elder-xs text-warm-500 flex items-center gap-2 flex-wrap">
                               <span>{SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3]}</span>
                               {record.isBackfilled && (
                                 <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[10px]">
@@ -599,6 +831,26 @@ export default function Review() {
                                 </span>
                               )}
                             </div>
+                            {record.morningFeeling && (
+                              <div className="flex items-start gap-1.5 text-elder-xs">
+                                <span className="text-lg leading-none">
+                                  {getMorningFeelingEmoji(record.morningFeeling)}
+                                </span>
+                                <div>
+                                  <span className={cn(
+                                    'font-medium',
+                                    record.morningFeeling === 'bad' ? 'text-rose-600' : 'text-warm-600'
+                                  )}>
+                                    晨起：{MORNING_FEELING_LABELS[record.morningFeeling]}
+                                  </span>
+                                  {record.morningNote && (
+                                    <p className="text-warm-500 mt-0.5">
+                                      💭 {record.morningNote}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                           {record.medicationNote && (
                             <button
@@ -623,16 +875,25 @@ export default function Review() {
                         </p>
                       </div>
                     )}
+                    {careNote && <CareNoteBadges note={careNote} />}
                   </div>
                 );
               })}
             </div>
-            {medChangeDays > 0 && (
-              <div className="mt-3 pt-3 border-t border-warm-100">
-                <p className="text-elder-xs text-warm-500 flex items-center gap-1">
-                  <Pill className="w-4 h-4 text-orange-500" />
-                  本周有 <b className="text-orange-600">{medChangeDays}</b> 天记录了服药变化
-                </p>
+            {(medChangeDays > 0 || careNoteDays > 0) && (
+              <div className="mt-3 pt-3 border-t border-warm-100 flex flex-col gap-1.5">
+                {medChangeDays > 0 && (
+                  <p className="text-elder-xs text-warm-500 flex items-center gap-1">
+                    <Pill className="w-4 h-4 text-orange-500" />
+                    本周有 <b className="text-orange-600">{medChangeDays}</b> 天记录了服药变化
+                  </p>
+                )}
+                {careNoteDays > 0 && (
+                  <p className="text-elder-xs text-warm-500 flex items-center gap-1">
+                    <Heart className="w-4 h-4 text-teal-500" />
+                    本周有 <b className="text-teal-600">{careNoteDays}</b> 天记录了照护备忘
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -703,6 +964,26 @@ export default function Review() {
             <h1 className="text-2xl font-bold text-center mb-1">好眠排程 — 睡眠周报</h1>
             <p className="text-center text-sm text-gray-600 mb-4">{formatWeekRange(monday)}</p>
 
+            {doctorConclusions.length > 0 && (
+              <div className="mb-4 p-3 bg-red-50 border-2 border-red-300 rounded">
+                <p className="font-bold text-red-800 mb-2">🎯 医生关注重点</p>
+                <div className="space-y-1.5">
+                  {doctorConclusions.slice(0, 3).map((c, idx) => (
+                    <div key={idx} className="text-sm">
+                      <span className={cn(
+                        'inline-block px-2 py-0.5 rounded text-xs font-bold mr-2',
+                        CATEGORY_COLORS[c.category] || 'bg-gray-100 text-gray-700'
+                      )}>
+                        {c.category}
+                      </span>
+                      <span className="font-medium text-gray-800">{c.title}</span>
+                      <span className="text-gray-600"> — {c.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b-2 border-gray-800">
@@ -710,13 +991,17 @@ export default function Review() {
                   <th className="border p-2 text-left">入睡时间</th>
                   <th className="border p-2 text-left">醒来次数</th>
                   <th className="border p-2 text-left">白天状态</th>
+                  <th className="border p-2 text-left">晨间感受</th>
                   <th className="border p-2 text-left">服药备注</th>
+                  <th className="border p-2 text-left">照护备忘</th>
                 </tr>
               </thead>
               <tbody>
                 {weekDays.map((day, i) => {
                   const iso = formatDateISO(day);
                   const record = recordMap.get(iso);
+                  const careNote = careNoteMap.get(iso);
+                  const careNoteSummary = careNote ? getCareNoteSummary(careNote) : [];
                   return (
                     <tr key={iso} className="border-b">
                       <td className="border p-2">
@@ -730,8 +1015,16 @@ export default function Review() {
                       <td className="border p-2">
                         {record ? getSleepinessEmoji(record.sleepiness) + ' ' + SLEEPINESS_LABELS[record.sleepiness as 1 | 2 | 3] : '—'}
                       </td>
+                      <td className="border p-2">
+                        {record?.morningFeeling
+                          ? getMorningFeelingEmoji(record.morningFeeling) + ' ' + MORNING_FEELING_LABELS[record.morningFeeling]
+                          : '—'}
+                      </td>
                       <td className="border p-2 text-xs">
                         {record?.medicationNote || '—'}
+                      </td>
+                      <td className="border p-2 text-xs">
+                        {careNoteSummary.length > 0 ? careNoteSummary.join('、') : '—'}
                       </td>
                     </tr>
                   );
@@ -776,6 +1069,10 @@ export default function Review() {
                   <span className="font-medium">😪 白天犯困的日子：</span>
                   {clinic.sleepyDays.length > 0 ? clinic.sleepyDays.join('、') : '无'}
                 </p>
+                <p>
+                  <span className="font-medium">😞 晨起差的日子：</span>
+                  {clinic.badMorningDays.length > 0 ? clinic.badMorningDays.join('、') : '无'}
+                </p>
               </div>
               {clinic.multiIssueDays.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-indigo-200">
@@ -799,6 +1096,24 @@ export default function Review() {
                   {records.filter(r => r.medicationNote?.trim()).map(r => (
                     <li key={r.id}>• {r.date}: {r.medicationNote}</li>
                   ))}
+                </ul>
+              </div>
+            )}
+
+            {careNoteDays > 0 && (
+              <div className="mt-4 p-3 bg-teal-50 border border-teal-200 rounded text-sm">
+                <p className="font-bold text-teal-800">📝 重点照护备忘</p>
+                <ul className="mt-2 text-xs text-teal-700 space-y-1">
+                  {weekCareNotes.map((n) => {
+                    const summary = getCareNoteSummary(n);
+                    if (summary.length === 0) return null;
+                    return (
+                      <li key={n.id}>
+                        • {formatDateCN(new Date(n.date))}：{summary.join('、')}
+                        {n.otherNote && `（备注：${n.otherNote}）`}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

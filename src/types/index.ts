@@ -16,12 +16,56 @@ export interface SleepRecord {
   awakenings: number;
   sleepiness: number;
   medicationNote: string;
+  morningFeeling?: MorningFeeling;
+  morningNote?: string;
   filledByFamily: boolean;
   notes: string;
   isBackfilled?: boolean;
   backfilledAt?: string;
   createdAt: string;
 }
+
+export type MorningFeeling = 'good' | 'normal' | 'bad' | null;
+
+export const MORNING_FEELING_OPTIONS: Array<{ value: MorningFeeling; emoji: string; label: string }> = [
+  { value: 'good', emoji: '😌', label: '睡得不错' },
+  { value: 'normal', emoji: '😐', label: '还行' },
+  { value: 'bad', emoji: '😞', label: '睡得不太好' },
+];
+
+export const MORNING_FEELING_LABELS: Record<NonNullable<MorningFeeling>, string> = {
+  good: '睡得不错 😌',
+  normal: '还行 😐',
+  bad: '睡得不太好 😞',
+};
+
+export interface CareNote {
+  id: string;
+  date: string;
+  nap?: boolean;
+  napMinutes?: number;
+  caffeine?: boolean;
+  caffeineTime?: 'morning' | 'afternoon' | 'evening' | null;
+  mood?: 'happy' | 'normal' | 'sad' | 'anxious' | null;
+  exercised?: boolean;
+  exerciseType?: string;
+  otherNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const CARE_NOTE_MOOD_OPTIONS: Array<{ value: NonNullable<CareNote['mood']>; emoji: string; label: string }> = [
+  { value: 'happy', emoji: '😊', label: '心情好' },
+  { value: 'normal', emoji: '😐', label: '一般' },
+  { value: 'sad', emoji: '😢', label: '低落' },
+  { value: 'anxious', emoji: '😰', label: '焦虑' },
+];
+
+export const CARE_NOTE_CAFFEINE_TIME: Array<{ value: NonNullable<CareNote['caffeineTime']>; label: string }> = [
+  { value: 'morning', label: '上午' },
+  { value: 'afternoon', label: '下午' },
+  { value: 'evening', label: '晚上' },
+];
 
 export interface DailySchedule {
   id: string;

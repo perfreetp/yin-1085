@@ -1,6 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
-import { type SleepRecord, SLEEPINESS_LABELS } from '@/types';
+import {
+  type SleepRecord,
+  type MorningFeeling,
+  SLEEPINESS_LABELS,
+  MORNING_FEELING_OPTIONS,
+  MORNING_FEELING_LABELS,
+} from '@/types';
 import { getTimeOptions, todayStr, generateId } from '@/utils/time';
 import { cn } from '@/lib/utils';
 import { Lock, PencilLine } from 'lucide-react';
@@ -33,9 +39,8 @@ function getRecentDays(): { iso: string; label: string; dayLabel: string; isToda
 }
 
 export default function SleepLog() {
-  const addSleepRecord = useStore((s) => s.addSleepRecord);
+  const upsertSleepRecord = useStore((s) => s.upsertSleepRecord);
   const updateSleepRecord = useStore((s) => s.updateSleepRecord);
-  const getTodayRecord = useStore((s) => s.getTodayRecord);
   const getRecordByDate = useStore((s) => s.getRecordByDate);
   const familyMode = useStore((s) => s.familyMode);
 
@@ -43,7 +48,8 @@ export default function SleepLog() {
   const [selectedDate, setSelectedDate] = useState(todayStr());
 
   const existingRecord = getRecordByDate(selectedDate);
-  const dayInfo = recentDays.find((d) => d.iso === selectedDate) || recentDays[recentDays.length - 1];
+  const dayInfo =
+    recentDays.find((d) => d.iso === selectedDate) || recentDays[recentDays.length - 1];
   const isBackfill = !dayInfo.isToday;
   const isToday = dayInfo.isToday;
 
@@ -51,6 +57,8 @@ export default function SleepLog() {
   const [awakenings, setAwakenings] = useState(-1);
   const [sleepiness, setSleepiness] = useState(0);
   const [medicationNote, setMedicationNote] = useState('');
+  const [morningFeeling, setMorningFeeling] = useState<MorningFeeling>(null);
+  const [morningNote, setMorningNote] = useState('');
   const [showMedication, setShowMedication] = useState(false);
   const [saved, setSaved] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -65,6 +73,8 @@ export default function SleepLog() {
     setAwakenings(-1);
     setSleepiness(0);
     setMedicationNote('');
+    setMorningFeeling(null);
+    setMorningNote('');
     setShowMedication(false);
   };
 
@@ -77,6 +87,8 @@ export default function SleepLog() {
         awakenings: awakenings === -1 ? 0 : awakenings,
         sleepiness,
         medicationNote,
+        morningFeeling,
+        morningNote,
         filledByFamily: familyMode,
       });
     } else {
@@ -87,13 +99,15 @@ export default function SleepLog() {
         awakenings: awakenings === -1 ? 0 : awakenings,
         sleepiness,
         medicationNote,
+        morningFeeling,
+        morningNote,
         filledByFamily: familyMode,
         notes: '',
         isBackfilled: isBackfill,
         backfilledAt: isBackfill ? new Date().toISOString() : undefined,
         createdAt: new Date().toISOString(),
       };
-      addSleepRecord(record);
+      upsertSleepRecord(record);
     }
 
     setSaved(true);
@@ -104,6 +118,8 @@ export default function SleepLog() {
       setAwakenings(-1);
       setSleepiness(0);
       setMedicationNote('');
+      setMorningFeeling(null);
+      setMorningNote('');
       setShowMedication(false);
     }, 2000);
   };
@@ -114,6 +130,8 @@ export default function SleepLog() {
     setAwakenings(existingRecord.awakenings);
     setSleepiness(existingRecord.sleepiness);
     setMedicationNote(existingRecord.medicationNote);
+    setMorningFeeling(existingRecord.morningFeeling ?? null);
+    setMorningNote(existingRecord.morningNote ?? '');
     if (existingRecord.medicationNote) setShowMedication(true);
     setIsEditing(true);
   };
@@ -143,8 +161,7 @@ export default function SleepLog() {
     }
 
     const isRecent =
-      Date.now() - new Date(existingRecord.createdAt).getTime() <
-      24 * 60 * 60 * 1000;
+      Date.now() - new Date(existingRecord.createdAt).getTime() < 24 * 60 * 60 * 1000;
     if (!isToday) return { canEdit: false, message: '非当日记录请家属代改' };
     if (isRecent) return { canEdit: true, message: '' };
     return { canEdit: false, message: '超过24小时请家属代改' };
@@ -177,7 +194,9 @@ export default function SleepLog() {
                   <span className="text-elder-sm font-bold mt-0.5">{d.label}</span>
                   {r && (
                     <span className="text-sm mt-0.5">
-                      {selectedDate === d.iso ? '✓' : SNOOZE_EMOJI[r.sleepiness as 1 | 2 | 3] || '✓'}
+                      {selectedDate === d.iso
+                        ? '✓'
+                        : SNOOZE_EMOJI[r.sleepiness as 1 | 2 | 3] || '✓'}
                     </span>
                   )}
                 </button>
@@ -210,6 +229,18 @@ export default function SleepLog() {
               <span className="text-warm-600">白天状态</span>
               <span>{SLEEPINESS_LABELS[existingRecord.sleepiness as 1 | 2 | 3]}</span>
             </div>
+            {existingRecord.morningFeeling && (
+              <div className="flex justify-between text-elder-base">
+                <span className="text-warm-600">早上起床感觉</span>
+                <span>{MORNING_FEELING_LABELS[existingRecord.morningFeeling]}</span>
+              </div>
+            )}
+            {existingRecord.morningNote && (
+              <div className="flex justify-between text-elder-base">
+                <span className="text-warm-600">晨间备注</span>
+                <span>{existingRecord.morningNote}</span>
+              </div>
+            )}
             {existingRecord.medicationNote && (
               <div className="flex justify-between text-elder-base">
                 <span className="text-warm-600">服药备注</span>
@@ -227,15 +258,16 @@ export default function SleepLog() {
             <>
               {editInfo.message && (
                 <div className="text-elder-sm text-warm-500 text-center flex items-center justify-center gap-1">
-                  {editInfo.canEdit ? <PencilLine className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                  {editInfo.canEdit ? (
+                    <PencilLine className="w-4 h-4" />
+                  ) : (
+                    <Lock className="w-4 h-4" />
+                  )}
                   {editInfo.message}
                 </div>
               )}
               {editInfo.canEdit && (
-                <button
-                  className="elder-btn-secondary w-full"
-                  onClick={handleEdit}
-                >
+                <button className="elder-btn-secondary w-full" onClick={handleEdit}>
                   修改
                 </button>
               )}
@@ -332,6 +364,34 @@ export default function SleepLog() {
       </div>
 
       <div className="elder-card space-y-4">
+        <div className="text-elder-lg font-bold">😊 早上起床感觉怎么样？</div>
+        <div className="grid grid-cols-3 gap-3">
+          {MORNING_FEELING_OPTIONS.map((opt) => (
+            <button
+              key={opt.value || 'empty'}
+              onClick={() => setMorningFeeling(morningFeeling === opt.value ? null : opt.value)}
+              className={cn(
+                'elder-card flex flex-col items-center justify-center py-4 border-2 border-transparent min-h-[80px] transition-all',
+                morningFeeling === opt.value && 'border-blue-400 bg-blue-50'
+              )}
+            >
+              <span className="text-3xl mb-1">{opt.emoji}</span>
+              <span className="text-elder-sm">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="space-y-2">
+          <p className="text-elder-sm text-warm-600">一句话补充（可选）</p>
+          <input
+            className="w-full border-2 border-warm-200 rounded-elder p-3 text-elder-base min-h-[48px] focus:outline-none focus:border-warm-400"
+            placeholder="如：醒了头疼、做了梦..."
+            value={morningNote}
+            onChange={(e) => setMorningNote(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="elder-card space-y-4">
         <div className="text-elder-lg font-bold">
           {isBackfill ? '那天白天感觉怎么样？' : '今天感觉怎么样？'}
         </div>
@@ -358,11 +418,7 @@ export default function SleepLog() {
           onClick={() => setShowMedication(!showMedication)}
         >
           <span>💊 服药备注（可选）</span>
-          <span
-            className={cn('transition-transform', showMedication && 'rotate-180')}
-          >
-            ▼
-          </span>
+          <span className={cn('transition-transform', showMedication && 'rotate-180')}>▼</span>
         </button>
         {showMedication && (
           <div className="mt-4 space-y-2">
@@ -380,14 +436,17 @@ export default function SleepLog() {
       </div>
 
       <button
-        className={cn(
-          'elder-btn-primary w-full',
-          !canSubmit && 'opacity-50 cursor-not-allowed'
-        )}
+        className={cn('elder-btn-primary w-full', !canSubmit && 'opacity-50 cursor-not-allowed')}
         disabled={!canSubmit}
         onClick={handleSubmit}
       >
-        {saved ? '记录已保存 ✓' : isBackfill ? '📝 保存补记' : '✅ 保存记录'}
+        {saved
+          ? '记录已保存 ✓'
+          : isBackfill
+          ? '📝 保存补记'
+          : isEditing
+          ? '✅ 修改记录'
+          : '✅ 保存记录'}
       </button>
     </div>
   );

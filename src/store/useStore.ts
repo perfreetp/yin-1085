@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { UserProfile, SleepRecord, DailySchedule, RelaxSession } from '@/types';
+import type { UserProfile, SleepRecord, DailySchedule, RelaxSession, CareNote, MorningFeeling } from '@/types';
 
 interface AppState {
   profile: UserProfile | null;
   sleepRecords: SleepRecord[];
+  careNotes: CareNote[];
   dailySchedules: DailySchedule[];
   relaxSessions: RelaxSession[];
   familyMode: boolean;
@@ -13,6 +14,7 @@ interface AppState {
   updateProfile: (partial: Partial<UserProfile>) => void;
   addSleepRecord: (record: SleepRecord) => void;
   updateSleepRecord: (id: string, partial: Partial<SleepRecord>) => void;
+  upsertSleepRecord: (record: SleepRecord) => void;
   getTodayRecord: () => SleepRecord | undefined;
   getRecordByDate: (date: string) => SleepRecord | undefined;
   getWeekRecords: (weekStart?: string) => SleepRecord[];
@@ -20,6 +22,9 @@ interface AppState {
   getTodaySchedule: () => DailySchedule | undefined;
   addRelaxSession: (session: RelaxSession) => void;
   setFamilyMode: (mode: boolean) => void;
+  addOrUpdateCareNote: (note: Omit<CareNote, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  getCareNoteByDate: (date: string) => CareNote | undefined;
+  getWeekCareNotes: (weekStart?: string) => CareNote[];
   checkConsecutiveAbnormal: () => boolean;
   getConsecutiveAbnormalDays: () => number;
   getWeekTrend: (weekStart?: string) => 'improving' | 'stable' | 'declining';
@@ -27,10 +32,17 @@ interface AppState {
     lateNights: string[];
     manyAwakenings: string[];
     sleepyDays: string[];
+    badMorningDays: string[];
     medicationDays: { date: string; note: string }[];
     multiIssueDays: { date: string; issues: string[] }[];
     totalRecords: number;
   };
+  getDoctorConclusions: (weekStart?: string) => Array<{
+    category: '作息' | '夜醒' | '白天犯困' | '晨间感受' | '服药变化' | '照护备忘';
+    priority: 'high' | 'medium' | 'low';
+    title: string;
+    detail: string;
+  }>;
   getCompanionAdvice: (weekStart?: string) => {
     dos: string[];
     donts: string[];
@@ -57,6 +69,7 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       profile: null,
       sleepRecords: [],
+      careNotes: [],
       dailySchedules: [],
       relaxSessions: [],
       familyMode: false,
@@ -79,6 +92,19 @@ export const useStore = create<AppState>()(
             r.id === id ? { ...r, ...partial } : r
           ),
         })),
+
+      upsertSleepRecord: (record) =>
+        set((state) => {
+          const existing = state.sleepRecords.find((r) => r.date === record.date);
+          if (existing) {
+            return {
+              sleepRecords: state.sleepRecords.map((r) =>
+                r.id === existing.id ? { ...existing, ...record } : r
+              ),
+            };
+          }
+          return { sleepRecords: [...state.sleepRecords, record] };
+        }),
 
       getTodayRecord: () => {
         const today = getTodayStr();
@@ -118,6 +144,39 @@ export const useStore = create<AppState>()(
         })),
 
       setFamilyMode: (mode) => set({ familyMode: mode }),
+
+      addOrUpdateCareNote: (note) =>
+        set((state) => {
+          const existing = state.careNotes.find((n) => n.date === note.date);
+          const now = new Date().toISOString();
+          if (existing) {
+            return {
+              careNotes: state.careNotes.map((n) =>
+                n.id === existing.id ? { ...existing, ...note, updatedAt: now } : n
+              ),
+            };
+          }
+          const newNote: CareNote = {
+            ...note,
+            id: 'care_' + Date.now(),
+            createdAt: now,
+            updatedAt: now,
+          };
+          return { careNotes: [...state.careNotes, newNote] };
+        }),
+
+      getCareNoteByDate: (date) => {
+        return get().careNotes.find((n) => n.date === date);
+      },
+
+      getWeekCareNotes: (weekStart) => {
+        const start = weekStart || getWeekStart();
+        const startDate = new Date(start);
+        return get().careNotes.filter((n) => {
+          const d = new Date(n.date);
+          return d >= startDate && d < new Date(startDate.getTime() + 7 * 86400000);
+        });
+      },
 
       checkConsecutiveAbnormal: () => {
         return get().getConsecutiveAbnormalDays() >= 3;
@@ -191,6 +250,9 @@ export const useStore = create<AppState>()(
         const sleepyDays = records
           .filter(r => r.sleepiness >= 3)
           .map(r => formatLabel(r.date));
+        const badMorningDays = records
+          .filter(r => r.morningFeeling === 'bad')
+          .map(r => formatLabel(r.date));
         const medicationDays = records
           .filter(r => r.medicationNote && r.medicationNote.trim())
           .map(r => ({ date: formatLabel(r.date), note: r.medicationNote }));
@@ -201,6 +263,7 @@ export const useStore = create<AppState>()(
             if (timeToMin(r.sleepTime) >= 24 * 60) count++;
             if (r.awakenings >= 3) count++;
             if (r.sleepiness >= 3) count++;
+            if (r.morningFeeling === 'bad') count++;
             if (r.medicationNote && r.medicationNote.trim()) count++;
             return count >= 2;
           })
@@ -209,6 +272,7 @@ export const useStore = create<AppState>()(
             if (timeToMin(r.sleepTime) >= 24 * 60) issues.push('入睡晚');
             if (r.awakenings >= 3) issues.push('醒得多');
             if (r.sleepiness >= 3) issues.push('白天困');
+            if (r.morningFeeling === 'bad') issues.push('晨起差');
             if (r.medicationNote && r.medicationNote.trim()) issues.push('服药变化');
             return { date: formatLabel(r.date), issues };
           });
@@ -217,10 +281,118 @@ export const useStore = create<AppState>()(
           lateNights,
           manyAwakenings,
           sleepyDays,
+          badMorningDays,
           medicationDays,
           multiIssueDays,
           totalRecords: records.length,
         };
+      },
+
+      getDoctorConclusions: (weekStart) => {
+        const records = get().getWeekRecords(weekStart);
+        const careNotes = get().getWeekCareNotes(weekStart);
+        const timeToMin = (t: string) => {
+          const [h, m] = t.split(':').map(Number);
+          const mins = h * 60 + m;
+          return mins < 12 * 60 ? mins + 24 * 60 : mins;
+        };
+
+        const conclusions: ReturnType<AppState['getDoctorConclusions']> = [];
+
+        const lateNights = records.filter(r => timeToMin(r.sleepTime) >= 24 * 60);
+        if (lateNights.length >= 2) {
+          const avgMin =
+            lateNights.reduce((s, r) => s + timeToMin(r.sleepTime), 0) / lateNights.length;
+          const avgH = Math.floor(avgMin / 60) - 24;
+          const avgM = avgMin % 60;
+          conclusions.push({
+            category: '作息',
+            priority: lateNights.length >= 3 ? 'high' : 'medium',
+            title: `有${lateNights.length}天入睡过晚`,
+            detail: `平均约 ${avgH}:${avgM.toString().padStart(2, '0')} 才上床，涉及日期：${lateNights.map(r => `${new Date(r.date).getMonth() + 1}/${new Date(r.date).getDate()}`).join('、')}`,
+          });
+        }
+
+        const manyAwakenings = records.filter(r => r.awakenings >= 3);
+        if (manyAwakenings.length >= 2) {
+          const avg =
+            manyAwakenings.reduce((s, r) => s + r.awakenings, 0) / manyAwakenings.length;
+          conclusions.push({
+            category: '夜醒',
+            priority: manyAwakenings.length >= 3 ? 'high' : 'medium',
+            title: `有${manyAwakenings.length}天夜里醒得多`,
+            detail: `平均每晚醒 ${avg.toFixed(1)} 次，涉及日期：${manyAwakenings.map(r => `${new Date(r.date).getMonth() + 1}/${new Date(r.date).getDate()}`).join('、')}`,
+          });
+        }
+
+        const sleepyDays = records.filter(r => r.sleepiness >= 3);
+        if (sleepyDays.length >= 2) {
+          conclusions.push({
+            category: '白天犯困',
+            priority: sleepyDays.length >= 3 ? 'high' : 'medium',
+            title: `有${sleepyDays.length}天白天犯困`,
+            detail: `影响了白天的精神状态，涉及日期：${sleepyDays.map(r => `${new Date(r.date).getMonth() + 1}/${new Date(r.date).getDate()}`).join('、')}`,
+          });
+        }
+
+        const badMornings = records.filter(r => r.morningFeeling === 'bad');
+        if (badMornings.length >= 1) {
+          conclusions.push({
+            category: '晨间感受',
+            priority: badMornings.length >= 3 ? 'high' : 'low',
+            title: `有${badMornings.length}天起床后感觉睡得不太好`,
+            detail: `${badMornings.map(r => `${new Date(r.date).getMonth() + 1}/${new Date(r.date).getDate()}`).join('、')}`,
+          });
+        }
+
+        const medChanges = records.filter(r => r.medicationNote && r.medicationNote.trim());
+        if (medChanges.length >= 1) {
+          conclusions.push({
+            category: '服药变化',
+            priority: 'high',
+            title: `有${medChanges.length}天记录了服药变化`,
+            detail: medChanges.map(r => `${new Date(r.date).getMonth() + 1}/${new Date(r.date).getDate()}：${r.medicationNote}`).join('；'),
+          });
+        }
+
+        const importantCareNotes = careNotes.filter(n =>
+          n.caffeine === true ||
+          n.mood === 'anxious' ||
+          n.mood === 'sad' ||
+          (n.nap && (n.napMinutes ?? 0) > 60)
+        );
+        if (importantCareNotes.length >= 1) {
+          const details = importantCareNotes.map(n => {
+            const parts: string[] = [];
+            if (n.caffeine) parts.push('喝咖啡/茶');
+            if (n.mood === 'anxious') parts.push('焦虑');
+            if (n.mood === 'sad') parts.push('情绪低落');
+            if (n.nap && (n.napMinutes ?? 0) > 60) parts.push(`午睡${n.napMinutes}分钟`);
+            return `${new Date(n.date).getMonth() + 1}/${new Date(n.date).getDate()}：${parts.join('、')}`;
+          });
+          conclusions.push({
+            category: '照护备忘',
+            priority: 'medium',
+            title: `有${importantCareNotes.length}天存在可能影响睡眠的因素`,
+            detail: details.join('；'),
+          });
+        }
+
+        if (conclusions.length === 0) {
+          conclusions.push({
+            category: '作息',
+            priority: 'low',
+            title: '本周睡眠整体平稳',
+            detail: '作息规律、夜醒和白天犯困都不明显，建议继续保持。',
+          });
+        }
+
+        conclusions.sort((a, b) => {
+          const order = { high: 0, medium: 1, low: 2 };
+          return order[a.priority] - order[b.priority];
+        });
+
+        return conclusions.slice(0, 3);
       },
 
       getCompanionAdvice: (weekStart) => {
